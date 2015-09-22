@@ -2,7 +2,7 @@
 # -*- coding: UTF-8 -*-
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -87,6 +87,11 @@ class FileActionProvider(ActionProvider):
         self.search = action_element.getAttribute('search')
         self.path = os.path.expanduser(os.path.expandvars(
             action_element.getAttribute('path')))
+        if 'nt' == os.name and self.path:
+            # convert forward slash to backslash for compatibility with getsize()
+            # and for display.  Do not convert an empty path, or it will become
+            # the current directory (.).
+            self.path = os.path.normpath(self.path)
         self.ds = {}
         if 'deep' == self.search:
             self.ds['regex'] = self.regex
@@ -396,6 +401,19 @@ class TestActionProvider(ActionProvider):
         (fd, filename) = tempfile.mkstemp('invalid-encoding-\xe4\xf6\xfc~')
         os.close(fd)
         yield Command.Delete(filename)
+
+
+class WinShellChangeNotify(ActionProvider):
+
+    """Action to clean the Windows Registry"""
+    action_key = 'win.shell.change.notify'
+
+    def get_commands(self):
+        import Windows
+        yield Command.Function(
+            None,
+            Windows.shell_change_notify,
+            None)
 
 
 class Winreg(ActionProvider):

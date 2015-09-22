@@ -2,7 +2,7 @@
 # -*- coding: UTF-8 -*-
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -27,6 +27,7 @@ Test case for module Windows
 import sys
 import tempfile
 import unittest
+import platform
 
 import common
 
@@ -35,33 +36,72 @@ if 'win32' == sys.platform:
     from win32com.shell import shell
 
 sys.path.append('.')
+from bleachbit.FileUtilities import extended_path
 from bleachbit.Windows import *
+
+
+def put_files_into_recycle_bin():
+    """Put a file and a folder into the recycle bin"""
+    # make a file and move it to the recycle bin
+    import tempfile
+    tests = (('regular', u'unicode-emdash-u\u2014', 'long' + 'x' * 100))
+    for test in tests:
+        (fd, filename) = tempfile.mkstemp(
+            prefix='bleachbit-recycle-file', suffix=test)
+        os.close(fd)
+        move_to_recycle_bin(filename)
+    # make a folder and move it to the recycle bin
+    dirname = tempfile.mkdtemp(prefix='bleachbit-recycle-folder')
+    open(os.path.join(dirname, 'file'), 'a').close()
+    move_to_recycle_bin(dirname)
 
 
 class WindowsTestCase(unittest.TestCase):
 
     """Test case for module Windows"""
 
+    def test_get_recycle_bin(self):
+        """Unit test for get_recycle_bin"""
+        for f in get_recycle_bin():
+            self.assert_(os.path.exists(extended_path(f)), f)
+        if not common.destructive_tests('get_recycle_bin'):
+            return
+        put_files_into_recycle_bin()
+        # clear recycle bin
+        counter = 0
+        for f in get_recycle_bin():
+            counter += 1
+            FileUtilities.delete(f)
+        self.assert_(counter >= 3, 'deleted %d' % counter)
+        # now it should be empty
+        for f in get_recycle_bin():
+            self.fail('recycle bin should be empty, but it is not')
+
     def test_delete_locked_file(self):
         """Unit test for delete_locked_file"""
-        (fd, pathname) = tempfile.mkstemp('bbregular')
-        os.close(fd)
-        self.assert_(os.path.exists(pathname))
-        try:
-            delete_locked_file(pathname)
-        except pywintypes.error, e:
-            if 5 == e.winerror and not shell.IsUserAnAdmin():
-                pass
-            else:
-                raise
+        tests = (('regular', u'unicode-emdash-u\u2014', 'long' + 'x' * 100))
+        for test in tests:
+            (fd, pathname) = tempfile.mkstemp(
+                prefix='bleachbit-delete-locked-file', suffix=test)
+            os.close(fd)
+            self.assert_(os.path.exists(pathname))
+            try:
+                delete_locked_file(pathname)
+            except pywintypes.error, e:
+                if 5 == e.winerror and not shell.IsUserAnAdmin():
+                    pass
+                else:
+                    raise
+            self.assert_(os.path.exists(pathname))
+        print 'NOTE: reboot Windows and check the three files are deleted'
 
     def test_delete_registry_key(self):
         """Unit test for delete_registry_key"""
         # (return value, key, really_delete)
         tests = ((False, 'HKCU\\Software\\BleachBit\\DoesNotExist', False, ),
-                (False, 'HKCU\\Software\\BleachBit\\DoesNotExist', True, ),
-                (True, 'HKCU\\Software\\BleachBit\\DeleteThisKey', False, ),
-                (True, 'HKCU\\Software\\BleachBit\\DeleteThisKey', True, ), )
+                 (False, 'HKCU\\Software\\BleachBit\\DoesNotExist', True, ),
+                 (True, 'HKCU\\Software\\BleachBit\\DeleteThisKey', False, ),
+                 (True, 'HKCU\\Software\\BleachBit\\DeleteThisKey', True, ), )
 
         # create a nested key
         key = 'Software\\BleachBit\\DeleteThisKey'
@@ -142,6 +182,19 @@ class WindowsTestCase(unittest.TestCase):
         self.assert_(os.path.exists(dirname),
                      'startup directory does not exist: %s' % dirname)
 
+    def test_get_known_folder_path(self):
+        """Unit test for get_known_folder_path"""
+        version = platform.uname()[3][0:3]
+        ret = get_known_folder_path('LocalAppDataLow')
+        self.assertNotEqual(ret, '')
+        if version <= '6.0':
+            # Before Vista
+            self.assertEqual(ret, None)
+            return
+        # Vista or later
+        self.assertNotEqual(ret, None)
+        self.assert_(os.path.exists(ret))
+
     def test_get_fixed_drives(self):
         """Unit test for get_fixed_drives"""
         drives = []
@@ -150,34 +203,57 @@ class WindowsTestCase(unittest.TestCase):
             self.assertEqual(drive, drive.upper())
         self.assert_("C:\\" in drives)
 
+    def test_empty_recycle_bin(self):
+        """Unit test for empty_recycle_bin"""
+        # check the function basically works
+        for drive in get_fixed_drives():
+            ret = empty_recycle_bin(drive, really_delete=False)
+            self.assert_(isinstance(ret, (int, long)))
+        if not common.destructive_tests('recycle bin'):
+            return
+        # check it deletes files for fixed drives
+        put_files_into_recycle_bin()
+        for drive in get_fixed_drives():
+            ret = empty_recycle_bin(drive, really_delete=True)
+            self.assert_(isinstance(ret, (int, long)))
+        # check it deletes files for all drives
+        put_files_into_recycle_bin()
+        ret = empty_recycle_bin(None, really_delete=True)
+        self.assert_(isinstance(ret, (int, long)))
+        # Repeat two for reasons.
+        # 1. Trying to empty an empty recycling bin can cause
+        #    a 'catastrophic failure' error (handled in the function)
+        # 2. It should show zero bytes were deleted
+        for drive in get_fixed_drives():
+            ret = empty_recycle_bin(drive, really_delete=True)
+            self.assertEqual(ret, 0)
+
     def test_is_process_running(self):
         tests = ((True, 'explorer.exe'),
-                (True, 'ExPlOrEr.exe'),
-                (False, 'doesnotexist.exe'))
+                 (True, 'ExPlOrEr.exe'),
+                 (False, 'doesnotexist.exe'))
         for test in tests:
             self.assertEqual(test[0], is_process_running(
                 test[1]), 'is_process_running(%s) != %s' % (test[1], test[0]))
             self.assertEqual(test[0], is_process_running_win32(test[1]))
             self.assertEqual(test[0], is_process_running_wmic(test[1]))
 
-    def test_empty_recycle_bin(self):
-        """Unit test for empty_recycle_bin"""
-        for drive in get_fixed_drives():
-            ret = empty_recycle_bin(drive, really_delete=False)
-            self.assert_(isinstance(ret, (int, long)))
-        if not common.destructive_tests('recycle bin'):
-            return
-        for drive in get_fixed_drives():
-            ret = empty_recycle_bin(drive, really_delete=True)
-            self.assert_(isinstance(ret, (int, long)))
-            # repeat because emptying empty recycle bin can cause
-            # 'catastrophic failure' error
+    def test_setup_environment(self):
+        """Unit test for setup_environment"""
+        setup_environment()
+        envs = ['commonappdata', 'documents',
+                'localappdata', 'music', 'pictures', 'video']
+        version = platform.uname()[3][0:3]
+        if version >= '6.0':
+            envs.append('localappdatalow')
+        for env in envs:
+            self.assert_(os.path.exists(os.environ[env]))
 
     def test_split_registry_key(self):
         """Unit test for split_registry_key"""
         tests = (('HKCU\\Software', _winreg.HKEY_CURRENT_USER, 'Software'),
-                ('HKLM\\SOFTWARE', _winreg.HKEY_LOCAL_MACHINE, 'SOFTWARE'),
-                ('HKU\\.DEFAULT', _winreg.HKEY_USERS, '.DEFAULT'))
+                 ('HKLM\\SOFTWARE', _winreg.HKEY_LOCAL_MACHINE, 'SOFTWARE'),
+                 ('HKU\\.DEFAULT', _winreg.HKEY_USERS, '.DEFAULT'))
         for (input_key, expected_hive, expected_key) in tests:
             (hive, key) = split_registry_key(input_key)
             self.assertEqual(expected_hive, hive)
@@ -203,6 +279,11 @@ class WindowsTestCase(unittest.TestCase):
         self.assertFalse(path_on_network('c:\\bleachbit.exe'))
         self.assertFalse(path_on_network('a:\\bleachbit.exe'))
         self.assertTrue(path_on_network('\\\\Server\\Folder\\bleachbit.exe'))
+
+    def test_shell_change_notify(self):
+        """Unit test for shell_change_notify"""
+        ret = shell_change_notify()
+        self.assertEqual(ret, 0)
 
 
 def suite():

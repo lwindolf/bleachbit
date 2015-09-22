@@ -1,7 +1,7 @@
 # vim: ts=4:sw=4:expandtab
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -112,7 +112,10 @@ class Worker:
             line = u"%s %s %s\n" % (ret['label'], size, path)
             self.total_deleted += ret['n_deleted']
             self.total_special += ret['n_special']
-            self.ui.append_text(line)
+            if ret['label']:
+                # the label may be a hidden operation
+                # (e.g., win.shell.change.notify)
+                self.ui.append_text(line)
 
     def clean_operation(self, operation):
         """Perform a single cleaning operation"""

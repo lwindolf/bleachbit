@@ -1,7 +1,7 @@
 # vim: ts=4:sw=4:expandtab
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -24,15 +24,12 @@ Perform (or assist with) cleaning operations.
 
 
 import glob
-try:
-    import gtk
-    HAVE_GTK = True
-except:
-    HAVE_GTK = False
+import logging
 import os.path
 import re
 import sys
 import traceback
+import warnings
 
 import Command
 import FileUtilities
@@ -48,6 +45,13 @@ from Common import _
 from FileUtilities import children_in_directory
 from Options import options
 
+warnings.simplefilter("ignore", Warning)
+                      # Supress GTK warning messages while running in CLI #34
+try:
+    import gtk
+    HAVE_GTK = True
+except:
+    HAVE_GTK = False
 
 # a module-level variable for holding cleaners
 backends = {}
@@ -130,7 +134,7 @@ class Cleaner:
         """Yield the names and descriptions of each option in a 2-tuple"""
         if self.options:
             for key in sorted(self.options.keys()):
-                yield ((self.options[key][0], self.options[key][1]))
+                yield (self.options[key][0], self.options[key][1])
 
     def get_options(self):
         """Return user-configurable options in 2-tuple (id, name)"""
@@ -184,6 +188,8 @@ class Firefox(Cleaner):
 
     def __init__(self):
         Cleaner.__init__(self)
+        self.add_option('backup', _('Backup files'), _(
+            'Delete the backup files'))
         self.add_option('cache', _('Cache'), _(
             'Delete the web cache, which reduces time to display revisited pages'))
         self.add_option('cookies', _('Cookies'), _(
@@ -216,16 +222,18 @@ class Firefox(Cleaner):
             self.profile_dir = "$USERPROFILE\\Application Data\\Mozilla\\Firefox\\Profiles\\*.default*\\"
             self.add_running('exe', 'firefox.exe')
 
-    def get_description(self):
-        return _("Web browser")
-
-    def get_id(self):
-        return 'firefox'
-
-    def get_name(self):
-        return "Firefox"
+        self.description = _("Web browser")
+        self.id = 'firefox'
+        self.name = "Firefox"
 
     def get_commands(self, option_id):
+        files = []
+        # backup files
+        if 'backup' == option_id:
+            bookmark_bu_dir = os.path.join(self.profile_dir, 'bookmarkbackups')
+            files += FileUtilities.expand_glob_join(bookmark_bu_dir, "*.json")
+            files += FileUtilities.expand_glob_join(
+                bookmark_bu_dir, "*.jsonlz4")
         # browser cache
         cache_base = None
         if 'posix' == os.name:
@@ -238,10 +246,17 @@ class Firefox(Cleaner):
             if 'nt' == os.name:
                 dirs += FileUtilities.expand_glob_join(
                     cache_base, "jumpListCache")  # Windows 8
+            if 'posix' == os.name:
+                # This path is whitelisted under the System - Cache cleaner,
+                # so it can be cleaned here.
+                dirs += [os.path.expanduser('~/.cache/mozilla')]
             for dirname in dirs:
                 for filename in children_in_directory(dirname, False):
                     yield Command.Delete(filename)
-        files = []
+            # Necko Predictive Network Actions
+            # https://wiki.mozilla.org/Privacy/Reviews/Necko
+            files += FileUtilities.expand_glob_join(
+                self.profile_dir, "netpredictions.sqlite")
         # cookies
         if 'cookies' == option_id:
             files += FileUtilities.expand_glob_join(
@@ -280,18 +295,32 @@ class Firefox(Cleaner):
                 self.profile_dir, "formhistory.sqlite")
         # passwords
         if 'passwords' == option_id:
+            # http://kb.mozillazine.org/Password_Manager
             files += FileUtilities.expand_glob_join(
                 self.profile_dir, "signons.txt")
             files += FileUtilities.expand_glob_join(
                 self.profile_dir, "signons[2-3].txt")
             files += FileUtilities.expand_glob_join(
                 self.profile_dir, "signons.sqlite")
+            files += FileUtilities.expand_glob_join(
+                self.profile_dir, "logins.json")
         # session restore
         if 'session_restore' == option_id:
+            # Names include sessionstore.js, sessionstore.bak,
+            # sessionstore.bak-20140715214327, sessionstore-1.js
             files += FileUtilities.expand_glob_join(
-                self.profile_dir, "sessionstore.js")
+                self.profile_dir, "sessionstore*.js")
             files += FileUtilities.expand_glob_join(
-                self.profile_dir, "sessionstore.bak")
+                self.profile_dir, "sessionstore.bak*")
+            ss_bu_dir = os.path.join(self.profile_dir, 'sessionstore-backups')
+            files += FileUtilities.expand_glob_join(
+                ss_bu_dir, 'previous.js')
+            files += FileUtilities.expand_glob_join(
+                ss_bu_dir, 'upgrade.js-20*')
+            files += FileUtilities.expand_glob_join(
+                ss_bu_dir, 'recovery.js')
+            files += FileUtilities.expand_glob_join(
+                ss_bu_dir, 'recovery.bak')
         # site-specific preferences
         if 'site_preferences' == option_id:
             files += FileUtilities.expand_glob_join(
@@ -340,6 +369,9 @@ class OpenOfficeOrg(Cleaner):
         self.add_option('cache', _('Cache'), _('Delete the cache'))
         self.add_option('recent_documents', _('Most recently used'), _(
             "Delete the list of recently used documents"))
+        self.id = 'openofficeorg'
+        self.name = 'OpenOffice.org'
+        self.description = _("Office suite")
 
         # reference: http://katana.oooninja.com/w/editions_of_openoffice.org
         if 'posix' == os.name:
@@ -350,28 +382,23 @@ class OpenOfficeOrg(Cleaner):
             self.prefixes = [
                 "$APPDATA\\OpenOffice.org\\3", "$APPDATA\\OpenOffice.org2"]
 
-    def get_description(self):
-        return _("Office suite")
-
-    def get_id(self):
-        return 'openofficeorg'
-
-    def get_name(self):
-        return "OpenOffice.org"
-
     def get_commands(self, option_id):
+        # paths for which to run expand_glob_join
+        egj = []
         if 'recent_documents' == option_id:
-            for prefix in self.prefixes:
-                for path in FileUtilities.expand_glob_join(prefix, "user/registry/data/org/openoffice/Office/Histories.xcu"):
-                    if os.path.lexists(path):
-                        yield Command.Delete(path)
-                for path in FileUtilities.expand_glob_join(prefix, "user/registry/cache/org.openoffice.Office.Histories.dat"):
-                    if os.path.lexists(path):
-                        yield Command.Delete(path)
+            egj.append(
+                "user/registry/data/org/openoffice/Office/Histories.xcu")
+            egj.append(
+                "user/registry/cache/org.openoffice.Office.Histories.dat")
 
         if 'recent_documents' == option_id and not 'cache' == option_id:
+            egj.append("user/registry/cache/org.openoffice.Office.Common.dat")
+
+        for egj_ in egj:
             for prefix in self.prefixes:
-                for path in FileUtilities.expand_glob_join(prefix, "user/registry/cache/org.openoffice.Office.Common.dat"):
+                for path in FileUtilities.expand_glob_join(prefix, egj_):
+                    if 'nt' == os.name:
+                        path = os.path.normpath(path)
                     if os.path.lexists(path):
                         yield Command.Delete(path)
 
@@ -381,6 +408,8 @@ class OpenOfficeOrg(Cleaner):
                 dirs += FileUtilities.expand_glob_join(
                     prefix, "user/registry/cache/")
             for dirname in dirs:
+                if 'nt' == os.name:
+                    dirname = os.path.normpath(dirname)
                 for filename in children_in_directory(dirname, False):
                     yield Command.Delete(filename)
 
@@ -489,14 +518,9 @@ class System(Cleaner):
         self.add_option(
             'tmp', _('Temporary files'), _('Delete the temporary files'))
 
-    def get_description(self):
-        return _("The system in general")
-
-    def get_id(self):
-        return 'system'
-
-    def get_name(self):
-        return _("System")
+        self.description = _("The system in general")
+        self.id = 'system'
+        self.name = _("System")
 
     def get_commands(self, option_id):
         # This variable will collect fully expanded file names, and
@@ -546,8 +570,10 @@ class System(Cleaner):
 
         # unwanted locales
         if 'posix' == os.name and 'localizations' == option_id:
-            callback = lambda locale, language: options.get_language(language)
-            for path in Unix.locales.localization_paths(callback):
+            for path in Unix.locales.localization_paths(locales_to_keep=options.get_languages()):
+                if os.path.isdir(path):
+                    for f in FileUtilities.children_in_directory(path, True):
+                        yield Command.Delete(f)
                 yield Command.Delete(path)
 
         # Windows logs
@@ -577,6 +603,8 @@ class System(Cleaner):
                 '$windir\\pchealth\\helpctr\\Logs\\hcupdate.log',
                 '$windir\\security\\logs\\*.log',
                 '$windir\\security\\logs\\*.old',
+                '$windir\\SoftwareDistribution\\*.log',
+                '$windir\\SoftwareDistribution\\DataStore\\Logs\\*',
                 '$windir\\system32\\TZLog.log',
                 '$windir\\system32\\config\\systemprofile\\Application Data\\Microsoft\\Internet Explorer\\brndlog.bak',
                 '$windir\\system32\\config\\systemprofile\\Application Data\\Microsoft\\Internet Explorer\\brndlog.txt',
@@ -616,7 +644,7 @@ class System(Cleaner):
             #
             # GNOME 2.28.1 (Ubuntu 9.10) and 2.30 (10.04) do not re-read
             # the file after truncation, but do re-read it after
-            # shreading.
+            # shredding.
             #
             # https://bugzilla.gnome.org/show_bug.cgi?id=591404
             for pathname in ["~/.recently-used.xbel", "~/.local/share/recently-used.xbel"]:
@@ -647,8 +675,12 @@ class System(Cleaner):
         if 'nt' == os.name and 'tmp' == option_id:
             dirname = os.path.expandvars(
                 "$USERPROFILE\\Local Settings\\Temp\\")
+            # whitelist the folder %TEMP%\Low but not its contents
+            # https://bugs.launchpad.net/bleachbit/+bug/1421726
+            low = os.path.join(dirname, 'low').lower()
             for filename in children_in_directory(dirname, True):
-                yield Command.Delete(filename)
+                if not low == filename.lower():
+                    yield Command.Delete(filename)
             dirname = os.path.expandvars("$windir\\temp\\")
             for filename in children_in_directory(dirname, True):
                 yield Command.Delete(filename)
@@ -717,14 +749,27 @@ class System(Cleaner):
 
         # recycle bin
         if 'nt' == os.name and 'recycle_bin' == option_id:
-            for drive in Windows.get_fixed_drives():
-                # TRANSLATORS: %s expands to a drive letter such as C:\ or D:\
-                label = _("Recycle bin %s") % drive
+            # This method allows shredding
+            for path in Windows.get_recycle_bin():
+                yield Command.Delete(path)
+            # If there were any files deleted, Windows XP will show the
+            # wrong icon for the recycle bin indicating it is not empty.
+            # The icon will be incorrect until logging in to Windows again
+            # or until it is emptied using the Windows API call for emptying
+            # the recycle bin.
 
-                def emptyrecyclebin():
-                    return Windows.empty_recycle_bin(drive, True)
-                # fixme: enable size preview
-                yield Command.Function(None, emptyrecyclebin, label)
+            # Windows 10 refreshes the recycle bin icon when the user
+            # opens the recycle bin folder.
+
+            # This is a hack to refresh the icon.
+            import tempfile
+            tmpdir = tempfile.mkdtemp()
+            Windows.move_to_recycle_bin(tmpdir)
+            try:
+                Windows.empty_recycle_bin(None, True)
+            except:
+                logger = logging.getLogger(__name__)
+                logger.info('error in empty_recycle_bin()', exc_info=True)
 
         # Windows Updates
         if 'nt' == os.name and 'updates' == option_id:
@@ -744,12 +789,17 @@ class System(Cleaner):
             '^/tmp/.vbox-[^/]+-ipc/lock$',
             '^/tmp/.wine-[0-9]+/server-.*/lock$',
             '^/tmp/gconfd-[^/]+/lock/ior$',
-            '^/tmp/ksocket-[^/]+/(Arts_SoundServerV2|secret-cookie)$',
+            '^/tmp/fsa/',  # fsarchiver
+            '^/tmp/kde-',
+            '^/tmp/kdesudo-',
+            '^/tmp/ksocket-',
             '^/tmp/orbit-[^/]+/bonobo-activation-register[a-z0-9-]*.lock$',
             '^/tmp/orbit-[^/]+/bonobo-activation-server-[a-z0-9-]*ior$',
             '^/tmp/pulse-[^/]+/pid$',
             '^/var/tmp/kdecache-']
         regexes.append('^' + os.path.expanduser('~/.cache/wallpaper/'))
+        # Clean Firefox cache from Firefox cleaner (LP#1295826)
+        regexes.append('^' + os.path.expanduser('~/.cache/mozilla'))
         regexes.append(
             '^' + os.path.expanduser('~/.cache/gnome-control-center/'))
         for regex in regexes:
@@ -797,6 +847,8 @@ def create_simple_cleaner(paths):
                 if not isinstance(path, (str, unicode)):
                     raise RuntimeError(
                         'expected path as string but got %s' % str(path))
+                if not os.path.isabs(path):
+                    path = os.path.abspath(path)
                 if os.path.isdir(path):
                     for child in children_in_directory(path, True):
                         yield Command.Shred(child)

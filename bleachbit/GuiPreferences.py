@@ -3,7 +3,7 @@
 
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -48,7 +48,9 @@ class PreferencesDialog:
 
     """Present the preferences dialog and save changes"""
 
-    def __init__(self, parent):
+    def __init__(self, parent, cb_refresh_operations):
+        self.cb_refresh_operations = cb_refresh_operations
+
         self.parent = parent
         self.dialog = gtk.Dialog(title=_("Preferences"),
                                  parent=parent,
@@ -77,6 +79,8 @@ class PreferencesDialog:
             if 'nt' == os.name:
                 self.cb_winapp2.set_sensitive(
                     options.get('check_online_updates'))
+        if 'auto_hide' == path:
+            self.cb_refresh_operations()
         if 'auto_start' == path:
             if 'nt' == os.name:
                 swc = Windows.start_with_computer
@@ -137,6 +141,15 @@ class PreferencesDialog:
 
             vbox.pack_start(updates_box, False)
 
+        # TRANSLATORS: This means to hide cleaners which would do
+        # nothing.  For example, if Firefox were never used on
+        # this system, this option would hide Firefox to simplify
+        # the list of cleaners.
+        cb_auto_hide = gtk.CheckButton(_("Hide irrelevant cleaners"))
+        cb_auto_hide.set_active(options.get('auto_hide'))
+        cb_auto_hide.connect('toggled', self.__toggle_callback, 'auto_hide')
+        vbox.pack_start(cb_auto_hide, False)
+
         # TRANSLATORS: Overwriting is the same as shredding.  It is a way
         # to prevent recovery of the data. You could also translate
         # 'Shred files to prevent recovery.'
@@ -151,6 +164,20 @@ class PreferencesDialog:
         cb_start.set_active(options.get('auto_start'))
         cb_start.connect('toggled', self.__toggle_callback, 'auto_start')
         vbox.pack_start(cb_start, False)
+
+        # Close the application after cleaning is complete.
+        cb_exit = gtk.CheckButton(_("Exit after cleaning"))
+        cb_exit.set_active(options.get('exit_done'))
+        cb_exit.connect('toggled', self.__toggle_callback, 'exit_done')
+        vbox.pack_start(cb_exit, False)
+
+        # Disable delete confirmation message.
+        cb_popup = gtk.CheckButton(_("Confirm before delete"))
+        cb_popup.set_active(options.get('delete_confirmation'))
+        cb_popup.connect(
+            'toggled', self.__toggle_callback, 'delete_confirmation')
+        vbox.pack_start(cb_popup, False)
+
         return vbox
 
     def __drives_page(self):
@@ -234,14 +261,12 @@ class PreferencesDialog:
 
         notice = gtk.Label(
             _("All languages will be deleted except those checked."))
-        vbox.pack_start(notice)
+        vbox.pack_start(notice, False)
 
         # populate data
         liststore = gtk.ListStore('gboolean', str, str)
-        for lang in Unix.locales.iterate_languages():
-            preserve = options.get_language(lang)
-            native = Unix.locales.native_name(lang)
-            liststore.append([preserve, lang, native])
+        for lang, native in sorted(Unix.Locales.native_locale_names.items()):
+            liststore.append([(options.get_language(lang)), lang, native])
 
         # create treeview
         treeview = gtk.TreeView(liststore)
@@ -268,7 +293,7 @@ class PreferencesDialog:
         swindow.set_policy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
         swindow.set_size_request(300, 200)
         swindow.add(treeview)
-        vbox.pack_start(swindow, False)
+        vbox.pack_start(swindow)
         return vbox
 
     def __locations_page(self, page_type):
@@ -384,7 +409,7 @@ class PreferencesDialog:
         elif LOCATIONS_CUSTOM == page_type:
             notice = gtk.Label(
                 _("These locations can be selected for deletion."))
-        vbox.pack_start(notice)
+        vbox.pack_start(notice, False)
 
         # create treeview
         treeview = gtk.TreeView(liststore)
@@ -406,7 +431,7 @@ class PreferencesDialog:
         swindow.set_policy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
         swindow.set_size_request(300, 200)
         swindow.add(treeview)
-        vbox.pack_start(swindow, False)
+        vbox.pack_start(swindow)
 
         # buttons that modify the list
         button_add_file = gtk.Button(_p('button', 'Add file'))

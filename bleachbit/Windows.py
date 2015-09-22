@@ -1,7 +1,7 @@
 # vim: ts=4:sw=4:expandtab
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -118,6 +118,17 @@ def browse_folder(hwnd, title):
         return None
     fullpath = shell.SHGetPathFromIDList(pidl)
     return fullpath
+
+
+def csidl_to_environ(varname, csidl):
+    """Define an environment variable from a CSIDL for use in CleanerML and Winapp2.ini"""
+    try:
+        sppath = shell.SHGetSpecialFolderPath(None, csidl)
+        set_environ(varname, sppath)
+    except:
+        traceback.print_exc()
+        print 'ERROR: setting environment variable "%s": %s ' % (
+            varname, str(sys.exc_info()[1]))
 
 
 def delete_locked_file(pathname):
@@ -265,6 +276,9 @@ def elevate_privileges():
         py = '"%s" --gui --no-uac' % pyfile
         exe = sys.executable
 
+    # add any command line parameters such as --debug-log
+    py = "%s %s" % (py, ' '.join(sys.argv[1:]))
+
     print 'debug: exe=', exe, ' parameters=', py
 
     rc = None
@@ -287,14 +301,21 @@ def elevate_privileges():
     return False
 
 
-def empty_recycle_bin(drive, really_delete):
-    """Empty the recycle bin or preview its size"""
-    bytes_used = shell.SHQueryRecycleBin(drive)[0]
-    if really_delete and bytes_used > 0:
+def empty_recycle_bin(path, really_delete):
+    """Empty the recycle bin or preview its size.
+
+    If the recycle bin is empty, it is not emptied again to avoid an error.
+
+    Keyword arguments:
+    path          -- A drive, folder or None.  None refers to all recycle bins.
+    really_delete -- If True, then delete.  If False, then just preview.
+    """
+    (bytes_used, num_files) = shell.SHQueryRecycleBin(path)
+    if really_delete and num_files > 0:
         # Trying to delete an empty Recycle Bin on Vista/7 causes a
         # 'catastrophic failure'
         flags = shellcon.SHERB_NOSOUND | shellcon.SHERB_NOCONFIRMATION | shellcon.SHERB_NOPROGRESSUI
-        shell.SHEmptyRecycleBin(None, drive, flags)
+        shell.SHEmptyRecycleBin(None, path, flags)
     return bytes_used
 
 
@@ -328,6 +349,83 @@ def get_fixed_drives():
     for drive in win32api.GetLogicalDriveStrings().split('\x00'):
         if win32file.GetDriveType(drive) == win32file.DRIVE_FIXED:
             yield drive
+
+
+def get_known_folder_path(folder_name):
+    """Return the path of a folder by its Folder ID
+
+    Requires Windows Vista, Server 2008, or later
+
+    Based on the code Michael Kropat (mkropat) from
+    <https://gist.github.com/mkropat/7550097>
+    licensed  under the GNU GPL"""
+    import ctypes
+    from ctypes import wintypes
+    from uuid import UUID
+
+    class GUID(ctypes.Structure):
+        _fields_ = [
+            ("Data1", wintypes.DWORD),
+            ("Data2", wintypes.WORD),
+            ("Data3", wintypes.WORD),
+            ("Data4", wintypes.BYTE * 8)
+        ]
+
+        def __init__(self, uuid_):
+            ctypes.Structure.__init__(self)
+            self.Data1, self.Data2, self.Data3, self.Data4[
+                0], self.Data4[1], rest = uuid_.fields
+            for i in range(2, 8):
+                self.Data4[i] = rest >> (8 - i - 1) * 8 & 0xff
+
+    class FOLDERID:
+        LocalAppDataLow = UUID(
+            '{A520A1A4-1780-4FF6-BD18-167343C5AF16}')
+
+    class UserHandle:
+        current = wintypes.HANDLE(0)
+
+    _CoTaskMemFree = windll.ole32.CoTaskMemFree
+    _CoTaskMemFree.restype = None
+    _CoTaskMemFree.argtypes = [ctypes.c_void_p]
+
+    try:
+        _SHGetKnownFolderPath = windll.shell32.SHGetKnownFolderPath
+    except AttributeError:
+        # Not supported on Windows XP
+        return None
+    _SHGetKnownFolderPath.argtypes = [
+        ctypes.POINTER(GUID), wintypes.DWORD, wintypes.HANDLE, ctypes.POINTER(
+            ctypes.c_wchar_p)
+    ]
+
+    class PathNotFoundException(Exception):
+        pass
+
+    folderid = getattr(FOLDERID, folder_name)
+    fid = GUID(folderid)
+    pPath = ctypes.c_wchar_p()
+    S_OK = 0
+    if _SHGetKnownFolderPath(ctypes.byref(fid), 0, UserHandle.current, ctypes.byref(pPath)) != S_OK:
+        raise PathNotFoundException()
+    path = pPath.value
+    _CoTaskMemFree(pPath)
+    return path
+
+
+def get_recycle_bin():
+    """Yield a list of files in the recycle bin"""
+    pidl = shell.SHGetSpecialFolderLocation(0, shellcon.CSIDL_BITBUCKET)
+    desktop = shell.SHGetDesktopFolder()
+    h = desktop.BindToObject(pidl, None, shell.IID_IShellFolder)
+    for item in h:
+        path = h.GetDisplayNameOf(item, shellcon.SHGDN_FORPARSING)
+        if os.path.isdir(path):
+            for child in FileUtilities.children_in_directory(path, True):
+                yield child
+            yield path
+        else:
+            yield path
 
 
 def is_process_running(name):
@@ -380,7 +478,7 @@ def is_process_running_win32(name):
             if len(clean_modname) > 0 and '?' != clean_modname:
                 # Filter out non-ASCII characters which we don't need
                 # and which may cause display warnings
-                clean_modname2 = re.sub('[^a-z\.]', '_', clean_modname.lower())
+                clean_modname2 = re.sub(r'[^a-z\.]', '_', clean_modname.lower())
                 if clean_modname2 == name.lower():
                     return True
 
@@ -393,11 +491,17 @@ def is_process_running_wmic(name):
     Works on Windows XP Professional but not on XP Home
     """
 
-    clean_name = re.sub('[^A-Za-z\.]', '_', name).lower()
+    clean_name = re.sub(r'[^A-Za-z\.]', '_', name).lower()
     args = ['wmic', 'path', 'win32_process', 'where', "caption='%s'" %
             clean_name, 'get', 'Caption']
     (_, stdout, _) = General.run_external(args)
     return stdout.lower().find(clean_name) > -1
+
+
+def move_to_recycle_bin(path):
+    """Move 'path' into recycle bin"""
+    shell.SHFileOperation(
+        (0, shellcon.FO_DELETE, path, None, shellcon.FOF_ALLOWUNDO | shellcon.FOF_NOCONFIRMATION))
 
 
 def path_on_network(path):
@@ -408,10 +512,55 @@ def path_on_network(path):
     return win32file.GetDriveType(drive) == win32file.DRIVE_REMOTE
 
 
+def shell_change_notify():
+    """Notify the Windows shell of update.
+
+    Used in windows_explorer.xml."""
+    shell.SHChangeNotify(shellcon.SHCNE_ASSOCCHANGED, shellcon.SHCNF_IDLIST,
+                         None, None)
+    return 0
+
+
+def set_environ(varname, path):
+    """Define an environment variable for use in CleanerML and Winapp2.ini"""
+    if not path:
+        # Such as LocalAppDataLow on XP
+        return
+    if os.environ.has_key(varname):
+        # Do not redefine the environment variable when it already exists
+        return
+    try:
+        if not os.path.exists(path):
+            raise RuntimeError(
+                'Variable %s points to a non-existent path %s' % (varname, path))
+        os.environ[varname] = path
+    except:
+        import traceback
+        traceback.print_exc()
+        print 'ERROR: setting environment variable "%s": %s ' % (
+            varname, str(sys.exc_info()[1]))
+
+
+def setup_environment():
+    """Define any extra environment variables for use in CleanerML and Winapp2.ini"""
+    csidl_to_environ('commonappdata', shellcon.CSIDL_COMMON_APPDATA)
+    csidl_to_environ('documents', shellcon.CSIDL_PERSONAL)
+    # Windows XP does not define localappdata, but Windows Vista and 7 do
+    csidl_to_environ('localappdata', shellcon.CSIDL_LOCAL_APPDATA)
+    csidl_to_environ('music', shellcon.CSIDL_MYMUSIC)
+    csidl_to_environ('pictures', shellcon.CSIDL_MYPICTURES)
+    csidl_to_environ('video', shellcon.CSIDL_MYVIDEO)
+    # LocalLowAppData does not have a CSIDL for use with
+    # SHGetSpecialFolderPath. Instead, it is identified using
+    # SHGetKnownFolderPath in Windows Vista and later
+    path = get_known_folder_path('LocalAppDataLow')
+    set_environ('LocalAppDataLow', path)
+
+
 def split_registry_key(full_key):
-    """Given a key like HKLM\Software split into tuple (hive, key).
+    r"""Given a key like HKLM\Software split into tuple (hive, key).
     Used internally."""
-    assert (len(full_key) >= 6)
+    assert len(full_key) >= 6
     [k1, k2] = full_key.split("\\", 1)
     hive_map = {
         'HKCR': _winreg.HKEY_CLASSES_ROOT,

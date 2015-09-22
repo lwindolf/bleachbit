@@ -2,7 +2,7 @@
 # vim: ts=4:sw=4:expandtab
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -29,7 +29,8 @@ import os
 import sys
 
 from Cleaner import backends, create_simple_cleaner, register_cleaners
-from Common import _, APP_VERSION
+from Common import _, APP_VERSION, encoding
+import Diagnostic
 import Options
 import Worker
 
@@ -40,17 +41,11 @@ class CliCallback:
 
     def __init__(self):
         """Initialize CliCallback"""
-        import locale
-        try:
-            self.encoding = locale.getdefaultlocale()[1]
-        except:
-            self.encoding = None
-        if not self.encoding:
-            self.encoding = 'UTF8'
+        self.encoding = encoding if encoding else 'UTF8'
 
     def append_text(self, msg, tag=None):
         """Write text to the terminal"""
-        # If the encoding is not explictly handled on a non-UTF-8
+        # If the encoding is not explicitly handled on a non-UTF-8
         # system, then special Latin-1 characters such as umlauts may
         # raise an exception as an encoding error.
         print msg.strip('\n').encode(self.encoding, 'replace')
@@ -140,6 +135,7 @@ def process_cmd_line():
                       # This is different than cleaning an arbitrary file, such as a
                       # spreadsheet on the desktop.
                       help=_("run cleaners to delete files and make other permanent changes"))
+    parser.add_option('--debug-log', help='log debug messages to file')
     parser.add_option("-s", "--shred", action="store_true",
                       help=_("shred specific files or folders"))
     parser.add_option("--sysinfo", action="store_true",
@@ -164,10 +160,16 @@ def process_cmd_line():
                       help=_('overwrite files to hide contents'))
     (options, args) = parser.parse_args()
     did_something = False
+    if options.debug_log:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.addHandler(logging.FileHandler(options.debug_log))
+        logger.info('BleachBit version %s' % APP_VERSION)
+        logger.info(Diagnostic.diagnostic_info())
     if options.version:
         print """
 BleachBit version %s
-Copyright (C) 2014 Andrew Ziem.  All rights reserved.
+Copyright (C) 2008-2015 Andrew Ziem.  All rights reserved.
 License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>.
 This is free software: you are free to change and redistribute it.
 There is NO WARRANTY, to the extent permitted by law.""" % APP_VERSION
@@ -213,7 +215,6 @@ There is NO WARRANTY, to the extent permitted by law.""" % APP_VERSION
         preview_or_clean(operations, True)
         sys.exit(0)
     if options.sysinfo:
-        import Diagnostic
         print Diagnostic.diagnostic_info()
         sys.exit(0)
     if not did_something:

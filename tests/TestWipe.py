@@ -2,7 +2,7 @@
 # vim: ts=4:sw=4:expandtab
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -132,7 +132,7 @@ def test_wipe_sub(n_bytes, mkfs_cmd):
     format_filesystem(filename, mkfs_cmd)
 
     # mount
-    mountpoint = tempfile.mkdtemp('bleachbit-wipe-mountpoint')
+    mountpoint = tempfile.mkdtemp(prefix='bleachbit-wipe-mountpoint')
     mount_filesystem(filename, mountpoint)
 
     # baseline free disk space

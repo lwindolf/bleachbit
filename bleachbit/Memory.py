@@ -2,7 +2,7 @@
 # -*- coding: UTF-8 -*-
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -155,7 +155,7 @@ def get_swap_size_linux(device, proc_swaps=None):
         if ret:
             return int(ret.group(1)) * 1024
     raise RuntimeError("error: cannot find size of swap device '%s'\n%s" %
-                      (device, proc_swaps))
+                       (device, proc_swaps))
 
 
 def get_swap_uuid(device):

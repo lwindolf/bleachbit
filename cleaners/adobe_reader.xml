@@ -2,7 +2,7 @@
 <!--
 
     BleachBit
-    Copyright (C) 2014 Andrew Ziem
+    Copyright (C) 2008-2015 Andrew Ziem
     http://bleachbit.sourceforge.net
 
     This program is free software: you can redistribute it and/or modify
@@ -21,6 +21,7 @@
 -->
 <cleaner id="adobe_reader">
   <label>Adobe Reader</label>
+  <description>Document viewer</description>
   <running type="exe">acroread</running>
   <option id="cache">
     <label>Cache</label>
@@ -33,11 +34,7 @@
     <label>Most recently used</label>
     <description>Delete the list of recently used documents</description>
     <action command="delete" search="file" path="~/.adobe/Acrobat/*/Preferences/reader_prefs"/>
-    <action command="winreg" path="HKCU\Software\Adobe\Acrobat Reader\5.0\AVGeneral\cRecentFiles"/>
-    <action command="winreg" path="HKCU\Software\Adobe\Acrobat Reader\6.0\AVGeneral\cRecentFiles"/>
-    <action command="winreg" path="HKCU\Software\Adobe\Acrobat Reader\7.0\AVGeneral\cRecentFiles"/>
-    <action command="winreg" path="HKCU\Software\Adobe\Acrobat Reader\8.0\AVGeneral\cRecentFiles"/>
-    <action command="winreg" path="HKCU\Software\Adobe\Acrobat Reader\9.0\AVGeneral\cRecentFiles"/>
+    <action command="winreg" path="HKCU\Software\Adobe\Acrobat Reader\*\AVGeneral\cRecentFiles"/>
   </option>
   <option id="tmp">
     <label>Temporary files</label>

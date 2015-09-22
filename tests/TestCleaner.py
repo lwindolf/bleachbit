@@ -1,7 +1,7 @@
 # vim: ts=4:sw=4:expandtab
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -72,16 +72,16 @@ class CleanerTestCase(unittest.TestCase):
             self.actions.append(
                 '<action command="delete" search="glob" path="$WINDIR\\system32\\*.dll"/>')
             self.actions.append(
-                '<action command="delete" search="walk.files" path="$WINDIR\\system\\"/>')
+                '<action command="delete" search="walk.files" path="$WINDIR\\system32\\"/>')
             self.actions.append(
                 '<action command="delete" search="walk.all" path="$WINDIR\\system32\\"/>')
         elif 'posix' == os.name:
             self.actions.append(
                 '<action command="delete" search="file" path="%s"/>' % __file__)
             self.actions.append(
-                '<action command="delete" search="glob" path="/usr/sbin/*sh"/>')
+                '<action command="delete" search="glob" path="/bin/*sh"/>')
             self.actions.append(
-                '<action command="delete" search="walk.files" path="/usr/sbin/"/>')
+                '<action command="delete" search="walk.files" path="/bin/"/>')
             self.actions.append(
                 '<action command="delete" search="walk.all" path="/var/log/"/>')
 
@@ -113,9 +113,9 @@ class CleanerTestCase(unittest.TestCase):
 
     def test_create_simple_cleaner(self):
         """Unit test for method create_simple_cleaner"""
-        (fd, filename1) = tempfile.mkstemp('bleachbit-test')
+        (fd, filename1) = tempfile.mkstemp(prefix='bleachbit-test-cleaner')
         os.close(fd)
-        (fd, filename2) = tempfile.mkstemp('bleachbit-test')
+        (fd, filename2) = tempfile.mkstemp(prefix='bleachbit-test-cleaner')
         os.close(fd)
         self.assert_(os.path.exists(filename1))
         self.assert_(os.path.exists(filename2))

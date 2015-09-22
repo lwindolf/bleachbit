@@ -1,7 +1,7 @@
 # vim: ts=4:sw=4:expandtab
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -54,12 +54,16 @@ def update_winapp2(url, hash_expected, append_text, cb_success):
     # download update
     opener = urllib2.build_opener()
     opener.addheaders = [('User-Agent', user_agent())]
-    doc = opener.open(url).read()
+    kwargs = {'fullurl': url}
+    if sys.hexversion >= 0x02060000:
+        # Python 2.6 added timeout option
+        kwargs['timeout'] = 20
+    doc = opener.open(**kwargs).read()
     # verify hash
     hash_actual = hashlib.sha512(doc).hexdigest()
     if hash_expected and not hash_actual == hash_expected:
         raise RuntimeError("hash for %s actually %s instead of %s" %
-                          (url, hash_actual, hash_expected))
+                           (url, hash_actual, hash_expected))
     # delete current
     if delete_current:
         from FileUtilities import delete
@@ -99,8 +103,14 @@ def user_agent():
     except:
         traceback.print_exc()
 
-    agent = "BleachBit/%s (%s; %s; %s)" % (Common.APP_VERSION,
-                                           __platform, __os, __locale)
+    try:
+        import gtk
+        gtkver = '; GTK %s' % '.'.join([str(x) for x in gtk.gtk_version])
+    except:
+        gtkver = ""
+
+    agent = "BleachBit/%s (%s; %s; %s%s)" % (Common.APP_VERSION,
+                                             __platform, __os, __locale, gtkver)
     return agent
 
 

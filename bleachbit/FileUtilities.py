@@ -2,7 +2,7 @@
 # -*- coding: UTF-8 -*-
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -29,6 +29,7 @@ import codecs
 import errno
 import glob
 import locale
+import logging
 import os
 import random
 import re
@@ -38,8 +39,10 @@ import sys
 import tempfile
 import time
 import ConfigParser
+import Common
 
 if 'nt' == os.name:
+    import pywintypes
     import win32file
 
 if 'posix' == os.name:
@@ -206,7 +209,9 @@ def delete(path, shred=False, ignore_missing=False, allow_shred=True):
        parameter, the path will be shredded unless allow_shred = False.
     """
     from Options import options
+    logger = logging.getLogger(__name__)
     is_special = False
+    path = extended_path(path)
     if not os.path.lexists(path):
         if ignore_missing:
             return
@@ -228,7 +233,7 @@ def delete(path, shred=False, ignore_missing=False, allow_shred=True):
             # [Errno 39] Directory not empty
             # https://bugs.launchpad.net/bleachbit/+bug/1012930
             if errno.ENOTEMPTY == e.errno:
-                print "info: directory '%s' is not empty" % (path)
+                logger.info("directory is not empty: %s", path)
             else:
                 raise
         except WindowsError, e:
@@ -237,7 +242,7 @@ def delete(path, shred=False, ignore_missing=False, allow_shred=True):
             # Error 145 may happen if the files are scheduled for deletion
             # during reboot.
             if 145 == e.winerror:
-                print "info: directory '%s' is not empty" % (path)
+                logger.info("directory is not empty: %s", path)
             else:
                 raise
     elif os.path.isfile(path):
@@ -247,14 +252,14 @@ def delete(path, shred=False, ignore_missing=False, allow_shred=True):
                 wipe_contents(path)
             except IOError, e:
                 # permission denied (13) happens shredding MSIE 8 on Windows 7
-                print "debug: IOError #%s shredding '%s'" % (e.errno, path)
+                logger.debug("IOError #%s shredding '%s'", e.errno, path)
             # wipe name
             os.remove(wipe_name(path))
         else:
             # unlink
             os.remove(path)
     else:
-        print "info: special file type cannot be deleted: '%s'" % (path)
+        logger.info("special file type cannot be deleted: %s", path)
 
 
 def ego_owner(filename):
@@ -276,12 +281,9 @@ def exists_in_path(filename):
 def exe_exists(pathname):
     """Returns boolean whether executable exists"""
     if os.path.isabs(pathname):
-        if not os.path.exists(pathname):
-            return False
+        return os.path.exists(pathname)
     else:
-        if not exists_in_path(pathname):
-            return False
-    return True
+        return exists_in_path(pathname)
 
 
 def execute_sqlite3(path, cmds):
@@ -293,14 +295,17 @@ def execute_sqlite3(path, cmds):
         try:
             cursor.execute(cmd)
         except sqlite3.DatabaseError, exc:
-            raise sqlite3.DatabaseError('%s: %s' % (exc, path))
+            raise sqlite3.DatabaseError(
+                '%s: %s' % (Common.decode_str(exc), path))
         except sqlite3.OperationalError, exc:
+            logger = logging.getLogger(__name__)
             if exc.message.find('no such function: ') >= 0:
                 # fixme: determine why randomblob and zeroblob are not
                 # available
-                print 'warning: %s' % exc.message
+                logger.warning(exc.message)
             else:
-                raise sqlite3.OperationalError('%s: %s' % (exc, path))
+                raise sqlite3.OperationalError(
+                    '%s: %s' % (Common.decode_str(exc), path))
     cursor.close()
     conn.commit()
     conn.close()
@@ -316,13 +321,26 @@ def expand_glob_join(pathname1, pathname2):
     return ret
 
 
+def extended_path(path):
+    """If applicable, return the extended Windows pathname"""
+    if 'nt' == os.name:
+        if path.startswith(r'\\?'):
+            return path
+        if path.startswith(r'\\'):
+            return '\\\\?\\unc\\' + path[2:]
+        return '\\\\?\\' + path
+    return path
+
+
 def free_space(pathname):
     """Return free space in bytes"""
     if 'nt' == os.name:
         import ctypes
         free_bytes = ctypes.c_int64()
-        ctypes.windll.kernel32.GetDiskFreeSpaceExW(unicode(pathname),
-                                                   ctypes.byref(free_bytes), None, None)
+        rc = ctypes.windll.kernel32.GetDiskFreeSpaceExW(unicode(pathname),
+                                                        ctypes.byref(free_bytes), None, None)
+        if 0 == rc:
+            raise ctypes.WinError()
         return free_bytes.value
     mystat = os.statvfs(pathname)
     return mystat.f_bfree * mystat.f_bsize
@@ -343,11 +361,14 @@ def getsize(path):
             raise
         return __stat.st_blocks * 512
     if 'nt' == os.name:
-        # On rare files os.path.getsize() returns access denied, so try
-        # FindFilesW instead
-        finddata = win32file.FindFilesW(path)
+        # On rare files os.path.getsize() returns access denied, so first
+        # try FindFilesW.
+        # Also, apply prefix to use extended-length paths to support longer
+        # filenames.
+        finddata = win32file.FindFilesW(extended_path(path))
         if finddata == []:
-            # FindFilesW doesn't work for directories, so fallback to getsize()
+            # FindFilesW does not work for directories, so fall back to
+            # getsize()
             return os.path.getsize(path)
         else:
             size = (finddata[0][4] * (0xffffffff + 1)) + finddata[0][5]
@@ -377,7 +398,7 @@ def globex(pathname, regex):
 
 def guess_overwrite_paths():
     """Guess which partitions to overwrite (to hide deleted files)"""
-    # In case overwritting leaves large files, placing them in
+    # In case overwriting leaves large files, placing them in
     # ~/.config makes it easy to find them and clean them.
     ret = []
     if 'posix' == os.name:
@@ -388,14 +409,26 @@ def guess_overwrite_paths():
         if not same_partition(home, '/tmp/'):
             ret.append('/tmp')
     elif 'nt' == os.name:
-        localtmp = dirname = os.path.expandvars(
-            "$USERPROFILE\\Local Settings\\Temp\\")
+        localtmp = os.path.expandvars('$TMP')
+        logger = logging.getLogger(__name__)
+        if not os.path.exists(localtmp):
+            logger.warning('%TMP% does not exist: %s', localtmp)
+            localtmp = None
+        else:
+            from win32file import GetLongPathName
+            localtmp = GetLongPathName(localtmp)
         from Windows import get_fixed_drives
         for drive in get_fixed_drives():
-            if same_partition(localtmp, drive):
-                ret.append(localtmp)
-            else:
-                ret.append(drive)
+            try:
+                if localtmp and same_partition(localtmp, drive):
+                    ret.append(localtmp)
+                else:
+                    ret.append(drive)
+            except Exception, e:
+                # see https://github.com/az0/bleachbit/issues/27
+                # https://bugs.launchpad.net/bleachbit/+bug/1372179
+                logger.error('error in same_partition(%s, %s): %s',
+                             localtmp, drive, Common.decode_str(e))
     else:
         NotImplementedError('Unsupported OS in guess_overwrite_paths')
     return ret
@@ -441,11 +474,19 @@ def listdir(directory):
 def same_partition(dir1, dir2):
     """Are both directories on the same partition?"""
     if 'nt' == os.name:
-        return free_space(dir1) == free_space(dir2)
+        try:
+            return free_space(dir1) == free_space(dir2)
+        except IOError, e:
+            if e.errno == errno.EACCES:
+                logger = logging.getLogger(__name__)
+                logger.error(
+                    'access denied for same_partition(%s, %s): %s', dir1, dir2, Common.decode_str(e))
+                # https://github.com/az0/bleachbit/issues/27
+                return False
+            raise
     stat1 = os.statvfs(dir1)
     stat2 = os.statvfs(dir2)
-    return (stat1.f_blocks == stat2.f_blocks and
-            stat1.f_bfree == stat2.f_bfree)
+    return stat1[stat.ST_DEV] == stat2[stat.ST_DEV]
 
 
 def sync():
@@ -454,7 +495,8 @@ def sync():
         import ctypes
         rc = ctypes.cdll.LoadLibrary('libc.so.6').sync()
         if 0 != rc:
-            print 'ERROR: sync() returned code %d' % rc
+            logger = logging.getLogger(__name__)
+            logge.error('sync() returned code %d' % rc)
     if 'nt' == os.name:
         import ctypes
         ctypes.cdll.LoadLibrary('msvcrt.dll')._flushall()
@@ -516,105 +558,9 @@ def wipe_contents(path, truncate=True):
     f.close()
 
 
-def wipe_inodes(pathname, idle=False):
-    """Create empty files with long names to clear remanence in metadata"""
-    # When the file system is full, Linux 3.5 will sometimes
-    # give an error and sometimes succeed.
-    errors = 0
-    files = []
-    if 'nt' == os.name:
-        # 255 according to http://en.wikipedia.org/wiki/Long_filename
-        f_namemax = 250
-        if not pathname.endswith('\\'):
-            pathname += '\\'
-    elif 'posix' == os.name:
-        f_namemax = os.statvfs(pathname).f_namemax
-        stats = os.statvfs(pathname)
-        inodes_avail_original = stats.f_favail
-    suffix = ' ' * (f_namemax - len(pathname) - 10)
-    print 'info: creating empty files'
-    print 'debug: suffix length = ', len(suffix)
-    last_idle = time.time()
-    # Creating the files in a sub-directory improves recovery
-    # of disk space:
-    # http://bleachbit.sourceforge.net/news/deleting-files-doesnt-free-disk-space
-    tmpdir = os.path.join(pathname, __random_string(10))
-    os.mkdir(tmpdir)
-
-    # create empty files until file system is exhausted
-    while True:
-        try:
-            (fd, fn) = tempfile.mkstemp(dir=tmpdir, suffix=suffix, prefix='')
-        except KeyboardInterrupt:
-            print 'info: wipe_inodes: keyboard interrupt'
-            break
-        except:
-            print 'error', sys.exc_info()[1]
-            errors += 1
-            if os.path.exists(fn):
-                # on Windows with FAT32, files sometimes exist despite error
-                files.append(fn)
-            try:
-                os.close(fd)
-            except:
-                pass
-        else:
-            errors = 0
-            files.append(fn)
-            os.close(fd)
-            if idle and (time.time() - last_idle) > 2:
-                stats = os.statvfs(pathname)
-                percent_done = None  # not implemented on Windows
-                if 'posix' == os.name:
-                    if inodes_avail_original > 0:
-                        percent_done = 1.0 * \
-                            (inodes_avail_original - stats.f_favail) / \
-                            inodes_avail_original
-                    else:
-                        percent_done = 1.0
-                yield (2, percent_done, None)
-                last_idle = time.time()
-            # In case the application closes prematurely, make sure this file
-            # is deleted
-            atexit.register(delete, fn, allow_shred=False, ignore_missing=True)
-        if errors > 10:
-            break
-        if 'posix' == os.name and 0 == os.statvfs(pathname).f_ffree:
-            break
-
-    # flush once because it is slow
-    sync()
-
-    # display effectiveness
-    if 'posix' == os.name:
-        stats = os.statvfs(pathname)
-        print 'info: %d inodes available, %d to super user' % (stats.f_ffree, stats.f_favail)
-
-    # clean up
-    files_len_original = len(files)
-    files_remaining = len(files)
-    print 'info: deleting %d empty files' % files_len_original
-    for f in files:
-        try:
-            os.remove(f)
-        except:
-            if os.path.exists(f):
-                print 'warning: could not delete empty file %s' % f
-            else:
-                print 'warning: exception deleting empty file %s' % f
-        files_remaining = - 1
-        if idle and (time.time() - last_idle) > 2:
-            percent_done = 1.0 * \
-                (files_len_original - len(files)) / files_len_original
-            yield (3, percent_done, None)
-            last_idle = time.time()
-
-    os.rmdir(tmpdir)
-    print 'debug: done deleting empty files'
-
-
 def wipe_name(pathname1):
     """Wipe the original filename and return the new pathname"""
+    logger = logging.getLogger(__name__)
     (head, _) = os.path.split(pathname1)
     # reference http://en.wikipedia.org/wiki/Comparison_of_file_systems#Limits
     maxlen = 226
@@ -630,7 +576,7 @@ def wipe_name(pathname1):
                 maxlen -= 10
             i += 1
             if i > 100:
-                print 'warning: exhausted long rename: ', pathname1
+                logger.info('exhausted long rename: %s', pathname1)
                 pathname2 = pathname1
                 break
     # finally, rename to a short name
@@ -643,20 +589,23 @@ def wipe_name(pathname1):
         except:
             i = i + 1
             if i > 100:
-                print 'warning: exhausted short rename: ', pathname2
+                logger.info('exhausted short rename: %s', pathname2)
                 pathname3 = pathname2
                 break
     return pathname3
 
 
 def wipe_path(pathname, idle=False):
-    """Wipe the free space in the path"""
+    """Wipe the free space in the path
+    This function uses an iterator to update the GUI."""
+
+    logger = logging.getLogger(__name__)
+
     def temporaryfile():
         # reference
         # http://en.wikipedia.org/wiki/Comparison_of_file_systems#Limits
         maxlen = 245
         f = None
-        i = 0
         while True:
             try:
                 kwargs = {
@@ -670,9 +619,12 @@ def wipe_path(pathname, idle=False):
                     delete, f.name, allow_shred=False, ignore_missing=True)
                 break
             except OSError, e:
-                if e.errno in (errno.ENAMETOOLONG, errno.ENOSPC):
+                if e.errno in (errno.ENAMETOOLONG, errno.ENOSPC, errno.ENOENT):
                     # ext3 on Linux 3.5 returns ENOSPC if the full path is greater than 264.
                     # Shrinking the size helps.
+
+                    # Microsoft Windows returns ENOENT "No such file or directory"
+                    # when the path is too long such as %TEMP% but not in C:\
                     if maxlen > 5:
                         maxlen -= 5
                         continue
@@ -695,7 +647,7 @@ def wipe_path(pathname, idle=False):
         remaining_seconds = int(remaining_bytes / (rate + 0.0001))
         return (1, done_percent, remaining_seconds)
 
-    print "debug: wipe_path('%s')" % pathname
+    logger.debug("wipe_path('%s')", pathname)
     files = []
     total_bytes = 0
     start_free_bytes = free_space(pathname)
@@ -704,7 +656,7 @@ def wipe_path(pathname, idle=False):
     # this loop is sometimes necessary to create multiple files.
     while True:
         try:
-            print 'debug: wipe_path: creating new temporary file'
+            logger.debug('creating new, temporary file to wipe path')
             f = temporaryfile()
         except OSError, e:
             # Linux gives errno 24
@@ -740,7 +692,7 @@ def wipe_path(pathname, idle=False):
             # IOError: [Errno 28] No space left on device
             # seen on Microsoft Windows XP SP3 with ~30GB free space but
             # not on another XP SP3 with 64MB free space
-            print "info: exception on f.flush()"
+            logger.info("info: exception on f.flush()")
         os.fsync(f.fileno())  # write to disk
         # Remember to delete
         files.append(f)
@@ -754,13 +706,15 @@ def wipe_path(pathname, idle=False):
     # statistics
     elapsed_sec = time.time() - start_time
     rate_mbs = (total_bytes / (1000 * 1000)) / elapsed_sec
-    print 'note: wrote %d files and %d bytes in %d seconds at %.2f MB/s' % \
-        (len(files), total_bytes, elapsed_sec, rate_mbs)
+    logger.info('wrote %d files and %d bytes in %d seconds at %.2f MB/s',
+                len(files), total_bytes, elapsed_sec, rate_mbs)
     # how much free space is left (should be near zero)
     if 'posix' == os.name:
         stats = os.statvfs(pathname)
-        print 'note: %d bytes and %d inodes available to non-super-user' % (stats.f_bsize * stats.f_bavail, stats.f_favail)
-        print 'note: %d bytes and %d inodes available to super-user' % (stats.f_bsize * stats.f_bfree, stats.f_ffree)
+        logger.info('%d bytes and %d inodes available to non-super-user',
+                    stats.f_bsize * stats.f_bavail, stats.f_favail)
+        logger.info('%d bytes and %d inodes available to super-user',
+                    stats.f_bsize * stats.f_bfree, stats.f_ffree)
     # truncate and close files
     for f in files:
         f.truncate(0)
@@ -774,10 +728,12 @@ def wipe_path(pathname, idle=False):
                 break
             except IOError, e:
                 if e.errno == 0:
-                    print 'debug: handled unknown error 0'
+                    logger.debug('handled unknown error 0')
                     time.sleep(0.1)
         # explicitly delete
-        delete(f.name)
+        # Python 2.5.4 always deletes NamedTemporaryFile, so
+        # ignore missing in older Python here.
+        delete(f.name, ignore_missing=sys.hexversion < 0x02060000)
 
 
 def vacuum_sqlite3(path):

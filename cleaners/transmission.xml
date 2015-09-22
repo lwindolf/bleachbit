@@ -2,7 +2,7 @@
 <!--
 
     BleachBit
-    Copyright (C) 2014 Andrew Ziem
+    Copyright (C) 2008-2015 Andrew Ziem
     http://bleachbit.sourceforge.net
 
     This program is free software: you can redistribute it and/or modify
@@ -23,10 +23,16 @@
   <label>Transmission</label>
   <description>File transfer client</description>
   <running type="exe">transmission</running>
-  <option id="cache">
-    <label>Cache</label>
-    <description>Delete the cache</description>
+  <option id="blocklists">
+    <label translators="Torrent software can block a list of IP addresses, such as those that may belong to malware or anti-piracy organizations">Blocklists</label>
+    <description>Delete the files</description>
+    <warning>Blocklists will need update to work.</warning>
     <action command="delete" search="walk.files" path="~/.config/transmission/blocklists/"/>
+  </option>
+  <option id="torrents">
+    <label>Torrents</label>
+    <description>Delete the torrents (just the metadata but not the files described)</description>
     <action command="delete" search="walk.files" path="~/.config/transmission/resume/"/>
+    <action command="delete" search="walk.files" path="~/.config/transmission/torrents/"/>
   </option>
 </cleaner>

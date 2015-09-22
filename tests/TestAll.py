@@ -1,7 +1,8 @@
+#!/usr/bin/env python
 # vim: ts=4:sw=4:expandtab
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -24,6 +25,7 @@ Run all test suites
 
 
 import os
+import sys
 import unittest
 
 import TestAction
@@ -74,6 +76,6 @@ def suite():
     map(suite_.addTest, suites)
     return suite_
 
-
 if __name__ == '__main__':
-    unittest.TextTestRunner(verbosity=2).run(suite())
+    success = unittest.TextTestRunner(verbosity=2).run(suite()).wasSuccessful()
+    sys.exit(success == False)

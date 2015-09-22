@@ -10,6 +10,8 @@ datadir ?= $(prefix)/share
 INSTALL = install
 INSTALL_DATA = $(INSTALL) -m 644
 
+# if not specified, do not check coverage
+COVERAGE ?= python
 
 build:
 	echo Nothing to build
@@ -18,12 +20,12 @@ clean:
 	@rm -vf {.,bleachbit,tests}/*{pyc,pyo,~}
 	@rm -vrf build dist # created by py2exe
 	@rm -rf BleachBit-Portable # created by windows/setup_py2exe.bat
-	@rm -rf BleachBit-0.0.0-portable.zip
+	@rm -rf BleachBit-*-portable.zip
 	@rm -vf MANIFEST # created by setup.py
 	make -C po clean
 	@rm -vrf locale
 	@rm -vrf {*/,./}*.{pychecker,pylint,pyflakes}.log
-	@rm -vrf windows/BleachBit-0.0.0-setup.exe
+	@rm -vrf windows/BleachBit-*-setup*.exe
 
 install:
 	# "binary"
@@ -64,8 +66,9 @@ lint:
 	exit 0
 
 tests:
-	make -C cleaners tests
-	python tests/TestAll.py -v
+	make -C cleaners tests; cleaners_status=$$?; \
+	$(COVERAGE) tests/TestAll.py -v; py_status=$$?; \
+	exit $$(($$cleaners_status + $$py_status))
 
 pretty:
 	autopep8 -i {.,bleachbit,tests}/*py

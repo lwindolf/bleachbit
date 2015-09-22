@@ -1,7 +1,7 @@
 # vim: ts=4:sw=4:expandtab
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -37,7 +37,7 @@ class CommandTestCase(unittest.TestCase):
 
     def test_Delete(self, cls=Delete):
         """Unit test for Delete"""
-        (fd, path) = tempfile.mkstemp('bleachbit-test')
+        (fd, path) = tempfile.mkstemp(prefix='bleachbit-test-command')
         os.write(fd, "foo")
         os.close(fd)
         cmd = cls(path)
@@ -57,7 +57,7 @@ class CommandTestCase(unittest.TestCase):
 
     def test_Function(self):
         """Unit test for Function"""
-        (fd, path) = tempfile.mkstemp('bleachbit-test')
+        (fd, path) = tempfile.mkstemp(prefix='bleachbit-test-command')
         os.write(fd, "foo")
         os.close(fd)
         cmd = Function(path, FileUtilities.delete, 'bar')

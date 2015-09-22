@@ -1,7 +1,7 @@
 # vim: ts=4:sw=4:expandtab
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -24,12 +24,12 @@ Test cases for module Winapp
 
 
 import os
+import shutil
 import sys
 import unittest
 
-
 sys.path.append('.')
-from bleachbit.Winapp import Winapp, detectos, section2option
+from bleachbit.Winapp import Winapp, detectos, detect_file, section2option
 from bleachbit.Windows import detect_registry_key
 
 import common
@@ -88,23 +88,55 @@ class WinappTestCase(unittest.TestCase):
         """Test detectos function"""
         # Tests are in the format (required_ver, mock, expected_return)
         tests = (('5.1', '5.1', True),
-                ('5.1', '6.0', False),
-                ('6.0', '5.1', False),
-                ('|5.1', '5.1', True),
-                ('|5.1', '6.0', False),
-                ('6.1|', '5.1', False),
-                ('6.1|', '6.0', False),
-                ('6.1|', '6.1', True),
-                ('6.1|', '6.2', True),
-                ('6.2|', '5.1', False),
-                ('6.2|', '6.0', False),
-                ('6.2|', '6.1', False),
-                ('6.2|', '6.2', True))
+                 ('5.1', '6.0', False),
+                 ('6.0', '5.1', False),
+                 ('|5.1', '5.1', True),
+                 ('|5.1', '6.0', False),
+                 ('6.1|', '5.1', False),
+                 ('6.1|', '6.0', False),
+                 ('6.1|', '6.1', True),
+                 ('6.1|', '6.2', True),
+                 ('6.2|', '5.1', False),
+                 ('6.2|', '6.0', False),
+                 ('6.2|', '6.1', False),
+                 ('6.2|', '6.2', True))
         for (s, mock, expected_return) in tests:
             actual_return = detectos(s, mock)
             self.assertEqual(expected_return, actual_return,
                              'detectos(%s, %s)==%s instead of %s' % (s, mock,
                                                                      actual_return, expected_return))
+
+    def test_detect_file(self):
+        """Test detect_file function"""
+        tests = [('%windir%\\system32\\kernel32.dll', True),
+                 ('%windir%\\system32', True),
+                 ('%ProgramFiles%\\Internet Explorer', True),
+                 ('%ProgramFiles%\\Internet Explorer\\', True),
+                 ('%windir%\\doesnotexist', False),
+                 ('%windir%\\system*', True),
+                 ('%windir%\\*ystem32', True),
+                 ('%windir%\\*ystem3*', True)]
+        # On 64-bit Windows, Winapp2.ini expands the %ProgramFiles% environment
+        # variable to also %ProgramW6432%, so test unique entries in
+        # %ProgramW6432%.
+        import struct
+        if not 32 == 8 * struct.calcsize('P'):
+            raise NotImplementedError('expecting 32-bit Python')
+        if os.getenv('ProgramW6432'):
+            dir_64 = os.listdir(os.getenv('ProgramFiles'))
+            dir_32 = os.listdir(os.getenv('ProgramW6432'))
+            dir_32_unique = set(dir_32) - set(dir_64)
+            if dir_32 and not dir_32_unique:
+                raise RuntimeError(
+                    'Test expects objects in %ProgramW6432% not in %ProgramFiles%')
+            for pathname in dir_32_unique:
+                tests.append(('%%ProgramFiles%%\\%s' % pathname, True))
+        else:
+            print 'NOTE: skipping %ProgramW6432% tests because WoW64 not detected'
+        for (pathname, expected_return) in tests:
+            actual_return = detect_file(pathname)
+            msg = 'detect_file(%s) returned %s' % (pathname, actual_return)
+            self.assertEqual(expected_return, actual_return, msg)
 
     def test_fake(self):
         """Test with fake file"""
@@ -115,7 +147,7 @@ class WinappTestCase(unittest.TestCase):
 
         def setup_fake(f1_filename=None):
             """Setup the test environment"""
-            dirname = tempfile.mkdtemp(suffix='bleachbit_test_winapp')
+            dirname = tempfile.mkdtemp(prefix='bleachbit-test-winapp')
             f1 = os.path.join(dirname, f1_filename or 'deleteme.log')
             file(f1, 'w').write('')
 
@@ -209,6 +241,7 @@ class WinappTestCase(unittest.TestCase):
             self.assertEqual(test[5], os.path.exists(f2))
             self.assertEqual(test[6], os.path.exists(fbak))
             self.assertEqual(test[7], cleaner.auto_hide())
+            shutil.rmtree(dirname, True)
 
         # negative tests where the application detect believes the application
         # is absent
@@ -246,7 +279,7 @@ class WinappTestCase(unittest.TestCase):
     def test_section2option(self):
         """Test for section2option()"""
         tests = (('  FOO2  ', 'foo2'),
-                ('A - B (C)', 'a_b_c'))
+                 ('A - B (C)', 'a_b_c'))
         for test in tests:
             self.assertEqual(section2option(test[0]), test[1])
 

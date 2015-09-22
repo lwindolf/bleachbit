@@ -2,7 +2,7 @@
 # vim: ts=4:sw=4:expandtab
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -89,7 +89,7 @@ class CLITestCase(unittest.TestCase):
             return
 
         (fd, filename) = tempfile.mkstemp(
-            prefix='encoding-\xe4\xf6\xfc~', dir='/tmp')
+            prefix='bleachbit-test-cli-encoding-\xe4\xf6\xfc~', dir='/tmp')
         os.close(fd)
         self.assert_(os.path.exists(filename))
 
@@ -115,7 +115,6 @@ class CLITestCase(unittest.TestCase):
 
     def test_preview(self):
         """Unit test for --preview option"""
-        return  # temp!!
         args_list = []
         path = os.path.join('bleachbit', 'CLI.py')
         big_args = [sys.executable, path, '--preview', ]
@@ -129,7 +128,7 @@ class CLITestCase(unittest.TestCase):
 
     def test_delete(self):
         """Unit test for --delete option"""
-        (fd, filename) = tempfile.mkstemp('bleachbit-test')
+        (fd, filename) = tempfile.mkstemp(prefix='bleachbit-test-cli-delete')
         os.close(fd)
         if 'nt' == os.name:
             import win32api
@@ -151,6 +150,23 @@ class CLITestCase(unittest.TestCase):
                      "%s not found deleted" % filename)
         os.remove(filename)
         self.assert_(not os.path.exists(filename))
+
+    def test_shred(self):
+        """Unit test for --shred"""
+        suffixes = ['', '.', '.txt']
+        dirs = ['.', None]
+        for dir_ in dirs:
+            for suffix in suffixes:
+                (fd, filename) = tempfile.mkstemp(
+                    prefix='bleachbit-test-cli-shred', suffix=suffix, dir=dir_)
+                os.close(fd)
+                if '.' == dir_:
+                    filename = os.path.basename(filename)
+                self.assert_(os.path.exists(filename))
+                path = os.path.join('bleachbit', 'CLI.py')
+                args = [sys.executable, path, '--shred', filename]
+                output = run_external(args, stdout=open(os.devnull, 'w'))
+                self.assert_(not os.path.exists(filename))
 
 
 def suite():

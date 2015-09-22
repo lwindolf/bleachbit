@@ -2,7 +2,7 @@
 <!--
 
     BleachBit
-    Copyright (C) 2014 Andrew Ziem
+    Copyright (C) 2008-2015 Andrew Ziem
     http://bleachbit.sourceforge.net
 
     This program is free software: you can redistribute it and/or modify
@@ -21,6 +21,7 @@
 -->
 <cleaner id="skype">
   <label>Skype</label>
+  <description>Chat client</description>
   <running type="exe">skype</running>
   <option id="chat_logs">
     <label>Chat logs</label>
@@ -29,5 +30,11 @@
     <action command="delete" search="glob" path="~/.Skype/*/chatsync/*/*.dat"/>
     <action command="delete" search="glob" path="$APPDATA\Skype\*\chatmsg[0-9]*.dbb"/>
     <action command="delete" search="glob" path="$APPDATA\Skype\*\chatsync\*\*.dat"/>
+  </option>
+  <option id="installers">
+    <label>Installers</label>
+    <description>Delete cached patches and installers</description>
+    <action command="delete" search="glob" path="$PROGRAMDATA\Skype\{*}\*.msi"/>
+    <action command="delete" search="glob" path="$PROGRAMDATA\Skype\{*}\*.exe"/>
   </option>
 </cleaner>

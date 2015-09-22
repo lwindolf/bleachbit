@@ -1,7 +1,7 @@
 # vim: ts=4:sw=4:expandtab
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -55,7 +55,10 @@ class CleanerML:
         self.option_warning = None
         self.xlate_cb = xlate_cb
         if None == self.xlate_cb:
-            self.xlate_cb = lambda x, y = None: None  # do nothing
+            self.xlate_mode = False
+            self.xlate_cb = lambda x, y=None: None  # do nothing
+        else:
+            self.xlate_mode = True
 
         dom = xml.dom.minidom.parse(pathname)
 
@@ -68,7 +71,7 @@ class CleanerML:
     def os_match(self, os_str):
         """Return boolean whether operating system matches"""
         # If blank or if in .pot-creation-mode, return true.
-        if len(os_str) == 0 or None != self.xlate_cb:
+        if len(os_str) == 0 or self.xlate_mode:
             return True
         # Otherwise, check platform.
         if os_str == 'linux' and sys.platform.startswith('linux'):
@@ -93,6 +96,8 @@ class CleanerML:
                 print str(sys.exc_info()[1])
                 print option.toxml()
         self.handle_cleaner_running(cleaner.getElementsByTagName('running'))
+        self.handle_localizations(
+            cleaner.getElementsByTagName('localizations'))
 
     def handle_cleaner_label(self, label):
         """<label> element under <cleaner>"""
@@ -104,7 +109,8 @@ class CleanerML:
     def handle_cleaner_description(self, description):
         """<description> element under <cleaner>"""
         self.cleaner.description = _(getText(description.childNodes))
-        self.xlate_cb(self.cleaner.description)
+        translators = description.getAttribute('translators')
+        self.xlate_cb(self.cleaner.description, translators)
 
     def handle_cleaner_running(self, running_elements):
         """<running> element under <cleaner>"""
@@ -147,7 +153,6 @@ class CleanerML:
     def handle_cleaner_option_description(self, description):
         """<description> element under <option>"""
         self.option_description = _(getText(description.childNodes))
-        self.xlate_cb(self.option_description)
         translators = description.getAttribute('translators')
         self.xlate_cb(self.option_description, translators)
 
@@ -166,6 +171,17 @@ class CleanerML:
         if None == provider:
             raise RuntimeError("Invalid command '%s'" % command)
         self.cleaner.add_action(self.option_id, provider)
+
+    def handle_localizations(self, localization_nodes):
+        """<localizations> element under <cleaner>"""
+        if not 'posix' == os.name:
+            return
+        import Unix
+        for localization_node in localization_nodes:
+            for child_node in localization_node.childNodes:
+                Unix.locales.add_xml(child_node)
+        # Add a dummy action so the file isn't reported as unusable
+        self.cleaner.add_action('localization', ActionProvider(None))
 
 
 def list_cleanerml_files(local_only=False):

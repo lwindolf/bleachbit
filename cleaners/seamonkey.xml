@@ -2,7 +2,7 @@
 <!--
 
     BleachBit
-    Copyright (C) 2014 Andrew Ziem
+    Copyright (C) 2008-2015 Andrew Ziem
     http://bleachbit.sourceforge.net
 
     This program is free software: you can redistribute it and/or modify
@@ -42,7 +42,9 @@
     <action command="delete" search="walk.files" path="~/.mozilla/default/Cache/"/>
     <action command="delete" search="walk.files" path="~/.mozilla/seamonkey/*/Cache/"/>
     <action command="delete" search="walk.files" path="$localappdata\Mozilla\Profiles\default\Cache\"/>
+    <action command="delete" search="walk.files" path="$localappdata\Mozilla\Profiles\default\cache2\"/>
     <action command="delete" search="walk.files" path="$localappdata\Mozilla\SeaMonkey\Profiles\*\Cache\"/>
+    <action command="delete" search="walk.files" path="$localappdata\Mozilla\SeaMonkey\Profiles\*\cache2\"/>
     <action command="delete" search="walk.files" path="$localappdata\Mozilla\SeaMonkey\Profiles\*\startupCache\"/>
   </option>
   <option id="chat_logs">
@@ -81,5 +83,6 @@
     <action command="delete" search="glob" path="~/.mozilla/*/????????.slt/history.dat"/>
     <action command="delete" search="glob" path="~/.mozilla/seamonkey/*.default/urlbarhistory.sqlite"/>
     <action command="delete" search="glob" path="$APPDATA\Mozilla\SeaMonkey\Profiles\*\urlbarhistory.sqlite"/>
+    <action command="delete" search="glob" path="$APPDATA\Mozilla\SeaMonkey\Profiles\*\sessionstore.bak"/>
   </option>
 </cleaner>

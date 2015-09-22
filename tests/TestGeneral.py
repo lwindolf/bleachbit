@@ -1,7 +1,7 @@
 # vim: ts=4:sw=4:expandtab
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -37,9 +37,9 @@ class GeneralTestCase(unittest.TestCase):
     def test_boolstr_to_bool(self):
         """Test case for method boolstr_to_bool"""
         tests = (('True', True),
-                ('true', True),
-                ('False', False),
-                ('false', False))
+                 ('true', True),
+                 ('False', False),
+                 ('false', False))
 
         for test in tests:
             self.assertEqual(boolstr_to_bool(test[0]), test[1])

@@ -1,7 +1,7 @@
 # vim: ts=4:sw=4:expandtab
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -105,7 +105,7 @@ class OptionsTestCase(unittest.TestCase):
         # This needs special consideration when combined with purging.
         o1 = bleachbit.Options.Options()
         import tempfile
-        dirname = tempfile.mkdtemp('bleachbit_test_options')
+        dirname = tempfile.mkdtemp(prefix='bleachbit-test-options')
         pathname = os.path.join(dirname, 'foo.xml')
         file(pathname, 'w').write('')  # make an empty file
         self.assertTrue(os.path.exists(pathname))

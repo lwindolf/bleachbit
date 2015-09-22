@@ -2,7 +2,7 @@
 # -*- coding: UTF-8 -*-
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -25,19 +25,20 @@ Code that is commonly shared throughout BleachBit
 
 import gettext
 import locale
+import logging
 import os
 import sys
 
-if 'nt' == os.name:
-    from win32com.shell import shell, shellcon
-
-APP_VERSION = "1.2"
+APP_VERSION = "1.9.1"
 APP_NAME = "BleachBit"
 APP_URL = "http://bleachbit.sourceforge.net"
 
-print "info: starting %s version %s" % (APP_NAME, APP_VERSION)
-
 socket_timeout = 10
+
+logger = logging.getLogger('bleachbit')
+logger.setLevel(logging.DEBUG)
+logger_sh = logging.StreamHandler()
+logger.addHandler(logger_sh)
 
 # Setting below value to false disables update notification (useful
 # for packages in repositories).
@@ -65,9 +66,8 @@ license_filenames = ('/usr/share/common-licenses/GPL-3',  # Debian, Ubuntu
                          bleachbit_exe_path, 'COPYING'),  # Microsoft Windows
                      '/usr/share/doc/bleachbit-' + APP_VERSION +
                      '/COPYING',  # CentOS, Fedora, RHEL
-                     '/usr/share/doc/packages/bleachbit/COPYING',
-                     # OpenSUSE 11.1
-                     '/usr/share/doc/bleachbit/COPYING',  # Mandriva
+                     '/usr/share/licenses/bleachbit/COPYING',  # Fedora 21+, RHEL 7+
+                     '/usr/share/doc/packages/bleachbit/COPYING',  # OpenSUSE 11.1
                      '/usr/pkg/share/doc/bleachbit/COPYING',  # NetBSD 5
                      '/usr/share/licenses/common/GPL3/license.txt')  # Arch Linux
 for lf in license_filenames:
@@ -102,7 +102,8 @@ elif sys.platform[:6] == 'netbsd':
     system_cleaners_dir = '/usr/pkg/share/bleachbit/cleaners'
 else:
     system_cleaners_dir = None
-    print 'warning: unknown system cleaners directory for platform ', sys.platform
+    logger.warning('unknown system cleaners directory for platform %s ' %
+                   sys.platform)
 
 # local cleaners directory (for running from source tree)
 local_cleaners_dir = os.path.normpath(
@@ -141,37 +142,18 @@ if 'posix' == os.name:
 
 
 #
-# setup environment
-#
-
-# Windows XP doesn't define localappdata, but Windows Vista and 7 do
-def environ(varname, csidl):
-    try:
-        os.environ[varname] = shell.SHGetSpecialFolderPath(None, csidl)
-    except:
-        traceback.print_exc()
-        msg = 'Error setting environemnt variable "%s": %s ' % (
-            varname, str(sys.exc_info()[1]))
-        import GuiBasic
-        GuiBasic.message_dialog(None, msg)
-if 'nt' == os.name:
-    environ('localappdata', shellcon.CSIDL_LOCAL_APPDATA)
-    environ('documents', shellcon.CSIDL_DESKTOPDIRECTORY)
-
-
-#
 # gettext
 #
-
 try:
-    user_locale = locale.getdefaultlocale()[0]
+    (user_locale, encoding) = locale.getdefaultlocale()
 except:
-    print 'warning: error getting locale: %s' % str(sys.exc_info()[1])
+    logger.warning('error getting locale: %s' % str(sys.exc_info()[1]))
     user_locale = None
+    encoding = None
 
 if None == user_locale:
     user_locale = 'C'
-    print "warning: No default locale found.  Assuming '%s'" % user_locale
+    logger.warning("no default locale found.  Assuming '%s'" % user_locale)
 
 if 'win32' == sys.platform:
     os.environ['LANG'] = user_locale
@@ -195,6 +177,24 @@ except:
             return singular
         return plural
 
+#
+# string decoding
+#
+# In Python 2, some strings such as Python exceptions may be localized
+# and byte encoded.  This decodes them into Unicode.
+# See <https://bugs.launchpad.net/bleachbit/+bug/1416640>.
+#
+
+
+def decode_str(s):
+    """Decode a string into Unicode using the default encoding"""
+    if isinstance(s, Exception):
+        # for convenience
+        return decode_str(s.message)
+    try:
+        return s.decode(encoding)
+    except:
+        return s.decode('ascii', 'replace')
 
 #
 # pgettext
@@ -231,7 +231,7 @@ def pgettext(msgctxt, msgid):
         return _(msgid)
 
 # Map our pgettext() custom function to _p()
-_p = lambda msgctxt, msgid: pgettext(msgctxt, msgid)
+_p = pgettext
 
 
 #

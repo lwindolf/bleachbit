@@ -2,7 +2,7 @@
 # -*- coding: UTF-8 -*-
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -51,10 +51,11 @@ def diagnostic_info():
     if 'posix' == os.name:
         envs = ('DESKTOP_SESSION', 'LOGNAME', 'USER', 'SUDO_UID')
     if 'nt' == os.name:
-        envs = ('APPDATA', 'localappdata', 'USERPROFILE')
+        envs = ('APPDATA', 'LocalAppData', 'LocalAppDataLow', 'Music',
+                'USERPROFILE', 'ProgramFiles', 'ProgramW6432', 'TMP')
     for env in envs:
         s += "\nos.getenv('%s') = %s" % (env, os.getenv(env))
-    s += "\nos.expanduser('~') = %s" % os.path.expanduser('~')
+    s += "\nos.path.expanduser('~') = %s" % os.path.expanduser('~')
     if sys.platform.startswith('linux'):
         if hasattr(platform, 'linux_distribution'):
             s += "\nplatform.linux_distribution() = %s" % str(

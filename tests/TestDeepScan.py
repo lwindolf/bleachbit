@@ -2,7 +2,7 @@
 # -*- coding: UTF-8 -*-
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -45,7 +45,7 @@ class DeepScanTestCase(unittest.TestCase):
     def _test_encoding(self, fn):
         """Test encoding"""
 
-        tempd = tempfile.mkdtemp('bleachbit-deepscan')
+        tempd = tempfile.mkdtemp(prefix='bleachbit-test-deepscan')
         self.assert_(os.path.exists(tempd))
 
         fullpath = os.path.join(tempd, fn)
@@ -90,7 +90,7 @@ class DeepScanTestCase(unittest.TestCase):
                 continue
             self.assert_(isinstance(ret, (str, unicode)),
                          "Expecting string but got '%s' (%s)" %
-                        (ret, str(type(ret))))
+                         (ret, str(type(ret))))
             self.assert_(os.path.lexists(ret))
 
     def test_delete(self):

@@ -1,7 +1,7 @@
 # vim: ts=4:sw=4:expandtab
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -34,6 +34,11 @@ from bleachbit.Action import *
 import common
 
 
+def dir_is_empty(dirname):
+    """Check whether a directory is empty"""
+    return not os.listdir(dirname)
+
+
 class ActionTestCase(unittest.TestCase):
 
     """Test cases for Action"""
@@ -58,6 +63,7 @@ class ActionTestCase(unittest.TestCase):
         action_node = dom.childNodes[0]
         command = action_node.getAttribute('command')
         filename = action_node.getAttribute('path')
+        search = action_node.getAttribute('search')
         provider = None
         for actionplugin in ActionProvider.plugins:
             if actionplugin.action_key == command:
@@ -72,9 +78,10 @@ class ActionTestCase(unittest.TestCase):
             common.validate_result(self, result)
             self.assertNotEqual('/', result['path'])
             # delete
-            result = cmd.execute(really_delete=True).next()
+            ret = cmd.execute(really_delete=True).next()
             if 'delete' == command:
-                self.assert_(not os.path.lexists(filename))
+                self.assert_(not os.path.lexists(cmd.path),
+                             'exists: %s' % cmd.path)
             elif 'truncate' == command:
                 self.assert_(os.path.lexists(filename))
                 os.remove(filename)
@@ -83,22 +90,35 @@ class ActionTestCase(unittest.TestCase):
                 self.assert_(os.path.lexists(filename))
             else:
                 raise RuntimeError("Unknown command '%s'" % command)
+        if 'walk.all' == search:
+            self.assert_(dir_is_empty(filename),
+                         'directory not empty after walk.all: %s' % filename)
 
     def test_delete(self):
         """Unit test for class Delete"""
         paths = ['~']
         if 'nt' == os.name:
             if sys.version_info[0] == 2 and sys.version_info[1] > 5:
+                # Python 2.6 and later supports %
                 paths.append('%USERPROFILE%')
             paths.append('${USERPROFILE}')
             paths.append('$USERPROFILE')
         if 'posix' == os.name:
             paths.append('$HOME')
         for path in paths:
-            for command in ('delete', 'truncate'):
+            for mode in ('delete', 'truncate', 'delete_forward'):
                 expanded = os.path.expanduser(os.path.expandvars(path))
-                (fd, filename) = tempfile.mkstemp(dir=expanded)
+                (fd, filename) = tempfile.mkstemp(
+                    dir=expanded, prefix='bleachbit-action-delete')
                 os.close(fd)
+                command = mode
+                if 'delete_forward' == mode:
+                    # forward slash needs to be normalized on Windows
+                    if 'nt' == os.name:
+                        command = 'delete'
+                        filename = filename.replace('\\', '/')
+                    else:
+                        continue
                 action_str = '<action command="%s" search="file" path="%s" />' % \
                     (command, filename)
                 self._test_action_str(action_str)
@@ -149,6 +169,23 @@ class ActionTestCase(unittest.TestCase):
         # clean up
         glob.iglob = _iglob
         FileUtilities.getsize = _getsize
+
+    def test_walk_all(self):
+        """Unit test for walk.all"""
+        dirname = tempfile.mkdtemp(prefix='bleachbit-walk-all')
+
+        # this sub-directory should be deleted
+        subdir = os.path.join(dirname, 'sub')
+        os.mkdir(subdir)
+        self.assert_(os.path.exists(subdir))
+
+        # this file should be deleted too
+        filename = os.path.join(subdir, 'file')
+        open(filename, 'a').close()
+
+        action_str = '<action command="delete" search="walk.all" path="%s" />' % dirname
+        self._test_action_str(action_str)
+        self.assert_(not os.path.exists(subdir))
 
     def test_walk_files(self):
         """Unit test for walk.files"""

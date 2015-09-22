@@ -2,7 +2,7 @@
 # vim: ts=4:sw=4:expandtab
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -27,11 +27,14 @@ Launcher
 import os
 import sys
 
+if 'nt' == os.name:
+    from bleachbit.Windows import setup_environment
+    setup_environment()
+
 if 'posix' == os.name and os.path.isdir('/usr/share/bleachbit'):
     # This path contains bleachbit/{C,G}LI.py .  This section is
     # unnecessary if installing BleachBit in site-packages.
     sys.path.append('/usr/share/')
-
 
 if 1 == len(sys.argv):
     import gtk

@@ -1,7 +1,7 @@
 # vim: ts=4:sw=4:expandtab
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -33,7 +33,7 @@ def __get_chrome_history(path, fn='History'):
     path_history = os.path.join(os.path.dirname(path), fn)
     ver = get_sqlite_int(
         path_history, 'select value from meta where key="version"')[0]
-    assert(ver > 1)
+    assert ver > 1
     return ver
 
 
@@ -49,6 +49,22 @@ def __shred_sqlite_char_columns(table, cols=None, where=""):
              for col in cols]), where)
     cmd += "delete from %s %s;" % (table, where)
     return cmd
+
+
+def __sqlite_table_exists(pathname, table):
+    """Check whether a table exists in the SQLite database"""
+    cmd = "select name from sqlite_master where type='table' and name=?;"
+    import sqlite3
+    conn = sqlite3.connect(pathname)
+    cursor = conn.cursor()
+    ret = False
+    cursor.execute(cmd, (table,))
+    if cursor.fetchone():
+        ret = True
+    cursor.close()
+    conn.commit()
+    conn.close()
+    return ret
 
 
 def get_sqlite_int(path, sql, parameters=None):
@@ -72,7 +88,6 @@ def delete_chrome_autofill(path):
     """Delete autofill table in Chromium/Google Chrome 'Web Data' database"""
     cols = ('name', 'value', 'value_lower')
     cmds = __shred_sqlite_char_columns('autofill', cols)
-    cmds += __shred_sqlite_char_columns('autofill_dates', ())
     FileUtilities.execute_sqlite3(path, cmds)
 
 
@@ -91,13 +106,14 @@ def delete_chrome_favicons(path):
     ver = __get_chrome_history(path)
     cmds = ""
 
-    if ver in [4, 20, 22, 23, 25, 26, 28]:
+    if ver in [4, 20, 22, 23, 25, 26, 28, 29]:
         # Version 4 includes Chromium 12
         # Version 20 includes Chromium 14, Google Chrome 15, Google Chrome 19
         # Version 22 includes Google Chrome 20
         # Version 25 is Google Chrome 26
         # Version 26 is Google Chrome 29
         # Version 28 is Google Chrome 30
+        # Version 29 is Google Chrome 37
 
         # icon_mapping
         cols = ('page_url',)
@@ -150,7 +166,8 @@ def delete_chrome_history(path):
     cmds += __shred_sqlite_char_columns('keyword_search_terms', cols)
     ver = __get_chrome_history(path)
     if ver >= 20:
-        # downloads, segments, segment_usage first seen in Chrome 14, Google Chrome 15 (database version = 20)
+        # downloads, segments, segment_usage first seen in Chrome 14,
+        #   Google Chrome 15 (database version = 20).
         # Google Chrome 30 (database version 28) doesn't have full_path, but it
         # does have current_path and target_path
         if ver >= 28:
@@ -239,6 +256,14 @@ def delete_mozilla_url_history(path):
     input_suffix = "where place_id not in (select distinct id from moz_places)"
     cols = ('input', )
     cmds += __shred_sqlite_char_columns('moz_inputhistory', cols, input_suffix)
+
+    # delete the whole moz_hosts table
+    # Reference: https://bugzilla.mozilla.org/show_bug.cgi?id=932036
+    # Reference:
+    # https://support.mozilla.org/en-US/questions/937290#answer-400987
+    if __sqlite_table_exists(path, 'moz_hosts'):
+        cmds += __shred_sqlite_char_columns('moz_hosts', ('host',))
+        cmds += "delete from moz_hosts;"
 
     # execute the commands
     FileUtilities.execute_sqlite3(path, cmds)

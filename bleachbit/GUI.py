@@ -2,8 +2,8 @@
 # vim: ts=4:sw=4:expandtab
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
-# http://sourceforge.net
+# Copyright (C) 2008-2015 Andrew Ziem
+# http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,11 +19,11 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 
+import logging
 import os
 import sys
 import threading
 import time
-import traceback
 import types
 import warnings
 
@@ -46,6 +46,7 @@ import GuiBasic
 
 if 'nt' == os.name:
     import Windows
+
 
 
 def threaded(func):
@@ -92,9 +93,10 @@ class TreeInfoModel:
             c_name = backends[key].get_name()
             c_id = backends[key].get_id()
             c_value = options.get_tree(c_id, None)
-            if not c_value and backends[key].auto_hide():
-                # hide irrelevant cleaner (e.g., the application is not
-                # detected)
+            if not c_value and options.get('auto_hide') \
+                    and backends[key].auto_hide():
+                logger = logging.getLogger(__name__)
+                logger.info("info: automatically hiding cleaner '%s'", (c_id))
                 continue
             parent = self.tree_store.append(None, (c_name, c_value, c_id))
             for (o_id, o_name) in backends[key].get_options():
@@ -205,6 +207,25 @@ class TreeDisplayModel:
         return
 
 
+class GtkLoggerHandler(logging.Handler):
+
+    def __init__(self, append_text):
+        logging.Handler.__init__(self)
+        self.append_text = append_text
+        self.min_level = logging.WARNING
+        if '--debug-log' in sys.argv:
+            self.min_level = logging.DEBUG
+
+    def emit(self, record):
+        if record.levelno < self.min_level:
+            return
+        tag = 'error' if record.levelno >= logging.WARNING else None
+        msg = record.getMessage()
+        if record.exc_text:
+            msg = msg + '\n' + record.exc_text
+        self.append_text(msg + '\n', tag)
+
+
 class GUI:
 
     """The main application GUI"""
@@ -311,8 +332,13 @@ class GUI:
     def run_operations(self, __widget):
         """Event when the 'delete' toolbar button is clicked."""
         # fixme: should present this dialog after finding operations
-        if not GuiBasic.delete_confirmation_dialog(self.window, True):
-            return
+
+        # Disable delete confirmation message.
+        # if the option is selected under preference.
+
+        if options.get("delete_confirmation"):
+            if not GuiBasic.delete_confirmation_dialog(self.window, True):
+                return
         self.preview_or_run_operations(True)
 
     def preview_or_run_operations(self, really_delete, operations=None):
@@ -336,10 +362,9 @@ class GUI:
             self.textbuffer.set_text("")
             self.progressbar.show()
             self.worker = Worker.Worker(self, really_delete, operations)
-        except:
-            traceback.print_exc()
-            err = str(sys.exc_info()[1])
-            self.append_text(err + "\n", 'error')
+        except Exception, e:
+            logger = logging.getLogger(__name__)
+            logger.exception('Error in Worker()')
         else:
             self.start_time = time.time()
             worker = self.worker.run()
@@ -353,15 +378,23 @@ class GUI:
         self.textview.scroll_mark_onscreen(self.textbuffer.get_insert())
         self.set_sensitive(True)
 
+        # Close the program after cleaning is completed.
+        # if the option is selected under preference.
+
+        if really_delete:
+            if options.get("exit_done"):
+                sys.exit()
+
         # notification for long-running process
         elapsed = (time.time() - self.start_time)
-        print 'debug: elapsed time: %d seconds' % elapsed
+        logger = logging.getLogger(__name__)
+        logger.debug('elapsed time: %d seconds', elapsed)
         if elapsed < 10 or self.window.is_active():
             return
         try:
             import pynotify
         except:
-            print "debug: pynotify not available"
+            logger.debug('pynotify not available')
         else:
             if pynotify.init(APP_NAME):
                 notify = pynotify.Notification('BleachBit', _("Done."),
@@ -378,7 +411,7 @@ class GUI:
                                           link: GuiBasic.open_url(link, self.window, False))
         dialog = gtk.AboutDialog()
         dialog.set_comments(_("Program to clean unnecessary files"))
-        dialog.set_copyright("Copyright (C) 2014 Andrew Ziem")
+        dialog.set_copyright("Copyright (C) 2008-2015 Andrew Ziem")
         try:
             dialog.set_license(open(license_filename).read())
         except:
@@ -440,7 +473,7 @@ class GUI:
 
     def cb_preferences_dialog(self, action):
         """Callback for preferences dialog"""
-        pref = PreferencesDialog(self.window)
+        pref = PreferencesDialog(self.window, self.cb_refresh_operations)
         pref.run()
 
     def cb_refresh_operations(self):
@@ -489,7 +522,11 @@ class GUI:
         self.shred_paths(paths)
 
     def shred_paths(self, paths):
-        """Shred file or folders"""
+        """Shred file or folders
+
+        If user confirms and files are deleted, returns True.  If
+        user aborts, returns False.
+        """
         # create a temporary cleaner object
         backends['_gui'] = Cleaner.create_simple_cleaner(paths)
 
@@ -501,10 +538,13 @@ class GUI:
             # delete
             self.preview_or_run_operations(True, operations)
             return True
+
+        # user aborted
         return False
 
     def cb_shred_quit(self, action):
         """Shred settings (for privacy reasons) and quit"""
+        # build a list of paths to delete
         paths = []
         if portable_mode:
             # in portable mode on Windows, the options directory includes
@@ -513,14 +553,23 @@ class GUI:
         else:
             paths.append(options_dir)
 
+        # prompt the user to confirm
         if not self.shred_paths(paths):
+            logger = logging.getLogger(__name__)
+            logger.debug('user aborted shred')
             # aborted
             return
 
+        # in portable mode, rebuild a minimal bleachbit.ini
         if portable_mode:
             open(options_file, 'w').write('[Portable]\n')
 
-        gtk.main_quit()
+        # Quit the application through the idle loop to allow the worker
+        # to delete the files.  Use the lowest priority because the worker
+        # uses the standard priority.  Otherwise, this will quit before
+        # the files are deleted.
+        gobject.idle_add(
+            lambda: gtk.main_quit(), priority=gobject.PRIORITY_LOW)
 
     def cb_wipe_free_space(self, action):
         """callback to wipe free space in arbitrary folder"""
@@ -686,6 +735,7 @@ class GUI:
         self.window.connect('destroy', lambda w: gtk.main_quit())
 
         self.window.resize(800, 600)
+        self.window.set_position(gtk.WIN_POS_CENTER)
         self.window.set_title(APP_NAME)
         if appicon_path and os.path.exists(appicon_path):
             self.window.set_icon_from_file(appicon_path)
@@ -760,10 +810,9 @@ class GUI:
             if updates:
                 gobject.idle_add(
                     lambda: Update.update_dialog(self.window, updates))
-        except:
-            traceback.print_exc()
-            self.append_text(
-                _("Error when checking for updates: ") + str(sys.exc_info()[1]), 'error')
+        except Exception, e:
+            logger = logging.getLogger(__name__)
+            logger.exception(_("Error when checking for updates: "))
 
     def __init__(self, uac=True, shred_paths=None):
         if uac and 'nt' == os.name and Windows.elevate_privileges():
@@ -774,11 +823,22 @@ class GUI:
         register_cleaners()
         self.create_window()
         gobject.threads_init()
+
+        # Redirect logging to the GUI.
+        bb_logger = logging.getLogger('bleachbit')
+        gtklog = GtkLoggerHandler(self.append_text)
+        bb_logger.addHandler(gtklog)
+        if 'nt' == os.name and 'windows_exe' == getattr(sys, 'frozen', None):
+            # On Microsoft Windows this avoids py2exe redirecting stderr to
+            # bleachbit.exe.log.
+            # sys.frozen = console_exe means the console is shown
+            from Common import logger_sh
+            bb_logger.removeHandler(logger_sh)
         if shred_paths:
             self.shred_paths(shred_paths)
             return
         if options.get("first_start") and 'posix' == os.name:
-            pref = PreferencesDialog(self.window)
+            pref = PreferencesDialog(self.window, self.cb_refresh_operations)
             pref.run()
             options.set('first_start', False)
         if online_update_notification_enabled and options.get("check_online_updates"):
@@ -790,10 +850,12 @@ class GUI:
             try:
                 import sqlite3
             except ImportError, e:
-                print e
-                print dir(e)
-                self.append_text(
-                    _("Error loading the SQLite module: the antivirus software may be blocking it."), 'error')
+                logger = logging.getLogger(__name__)
+                logger.exception(
+                    _("Error loading the SQLite module: the antivirus software may be blocking it."))
+        if 'posix' == os.name and os.path.expanduser('~') == '/root':
+            self.append_text(
+                _('You are running BleachBit with administrative privileges for cleaning shared parts of the system, and references to the user profile folder will clean only the root account.'))
 
 
 if __name__ == '__main__':

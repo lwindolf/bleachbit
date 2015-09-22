@@ -1,7 +1,7 @@
 # vim: ts=4:sw=4:expandtab
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -28,6 +28,7 @@ import Common
 import ConfigParser
 import Windows
 import os
+import glob
 import re
 import traceback
 
@@ -53,16 +54,12 @@ langsecref_map = {'3021': ('winapp2_applications', _('Applications')),
                   # TRANSLATORS: This is cleaner name for cleaners imported
                   # from winapp2.ini.
                   '3025': ('winapp2_windows', 'Microsoft Windows'),
-                  # 3026 = Firefox/Mozilla
                   '3026': ('winapp2_mozilla', 'Firefox/Mozilla'),
-                  # 3027 = Opera
                   '3027': ('winapp2_opera', 'Opera'),
-                  # 3028 = Safari
                   '3028': ('winapp2_safari', 'Safari'),
-                  # 3029 = Google Chrome
                   '3029': ('winapp2_google_chrome', 'Google Chrome'),
-                  # 3030 = Thunderbird
-                  '3030': ('winapp2_thunderbird', 'thunderbird'),
+                  '3030': ('winapp2_thunderbird', 'Thunderbird'),
+                  '3031': ('winapp2_windows_store', 'Windows Store'),
                   # Section=Games (technically not langsecref)
                   'Games': ('winapp2_games', _('Games'))}
 
@@ -78,11 +75,6 @@ def section2option(s):
     ret = re.sub(r'_+', '_', ret)
     ret = re.sub(r'(^_|_$)', '', ret)
     return ret
-
-
-def preexpand(s):
-    """Prepare pathname for expansion by changing %foo% to ${foo}"""
-    return re.sub(r'%([a-zA-Z]+)%', r'${\1}', s)
 
 
 def detectos(required_ver, mock=False):
@@ -101,6 +93,31 @@ def detectos(required_ver, mock=False):
     else:
         # Exact version
         return required_ver == current_os
+
+
+def winapp_expand_vars(pathname):
+    """Expand environment variables using special Winapp2.ini rules"""
+    # Change %foo% to ${foo} as required by Python 2.5.4 (but not 2.7.8)
+    pathname = re.sub(r'%([a-zA-Z0-9]+)%', r'${\1}', pathname)
+    # This is the regular expansion
+    expand1 = os.path.expandvars(pathname)
+    # Winapp2.ini expands %ProgramFiles% to %ProgramW6432%, etc.
+    subs = (('ProgramFiles', 'ProgramW6432'),
+            ('CommonProgramFiles', 'CommonProgramW6432'))
+    for (sub_orig, sub_repl) in subs:
+        pattern = re.compile(r'\${%s}' % sub_orig, flags=re.IGNORECASE)
+        if pattern.match(pathname):
+            expand2 = pattern.sub('${%s}' % sub_repl, pathname)
+            return (expand1, os.path.expandvars(expand2))
+    return (expand1,)
+
+
+def detect_file(pathname):
+    """Check whether a path exists for DetectFile#="""
+    for expanded in winapp_expand_vars(pathname):
+        for thispath in glob.iglob(expanded):
+            return True
+    return False
 
 
 class Winapp:
@@ -148,9 +165,6 @@ class Winapp:
 
     def handle_section(self, section):
         """Parse a section"""
-        def detect_file(rawpath):
-            pathname = os.path.expandvars(preexpand(rawpath))
-            return os.path.exists(pathname)
         # if simple detection fails then discard the section
         if self.parser.has_option(section, 'detect'):
             key = self.parser.get(section, 'detect')
@@ -247,7 +261,7 @@ class Winapp:
 
         Section is [Application Name] and option is the FileKey#"""
         elements = self.parser.get(ini_section, ini_option).strip().split('|')
-        dirname = preexpand(elements.pop(0))
+        dirnames = winapp_expand_vars(elements.pop(0))
         filenames = ""
         if elements:
             filenames = elements.pop(0)
@@ -263,9 +277,10 @@ class Winapp:
             else:
                 print 'WARNING: unknown file option %s in section %s' % (element, ini_section)
         for filename in filenames.split(';'):
-            for provider in self.__make_file_provider(dirname, filename, recurse, removeself):
-                self.cleaners[lid].add_action(
-                    section2option(ini_section), provider)
+            for dirname in dirnames:
+                for provider in self.__make_file_provider(dirname, filename, recurse, removeself):
+                    self.cleaners[lid].add_action(
+                        section2option(ini_section), provider)
 
     def handle_regkey(self, lid, ini_section, ini_option):
         """Parse a RegKey# option"""

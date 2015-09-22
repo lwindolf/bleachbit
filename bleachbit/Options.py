@@ -1,7 +1,7 @@
 # vim: ts=4:sw=4:expandtab
 
 # BleachBit
-# Copyright (C) 2014 Andrew Ziem
+# Copyright (C) 2008-2015 Andrew Ziem
 # http://bleachbit.sourceforge.net
 #
 # This program is free software: you can redistribute it and/or modify
@@ -35,8 +35,8 @@ if 'nt' == os.name:
     from win32file import GetLongPathName
 
 
-boolean_keys = ['auto_start', 'check_beta',
-                'check_online_updates', 'first_start', 'shred']
+boolean_keys = ['auto_hide', 'auto_start', 'check_beta',
+                'check_online_updates', 'first_start', 'shred', 'exit_done', 'delete_confirmation']
 if 'nt' == os.name:
     boolean_keys.append('update_winapp2')
 
@@ -191,13 +191,21 @@ class Options:
             self.config.add_section("hashpath")
         if not self.config.has_section("list/shred_drives"):
             from FileUtilities import guess_overwrite_paths
-            self.set_list('shred_drives', guess_overwrite_paths())
+            try:
+                self.set_list('shred_drives', guess_overwrite_paths())
+            except:
+                traceback.print_exc()
+                print 'ERROR: error setting default shred drives'
 
         # set defaults
+        self.__set_default("auto_hide", True)
         self.__set_default("auto_start", False)
         self.__set_default("check_beta", False)
         self.__set_default("check_online_updates", True)
         self.__set_default("shred", False)
+        self.__set_default("exit_done", False)
+        self.__set_default("delete_confirmation", True)
+
         if 'nt' == os.name:
             self.__set_default("update_winapp2", False)
 
